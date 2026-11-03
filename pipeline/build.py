@@ -157,33 +157,47 @@ elo_match = Matcher(elo.keys())
 # ======================================================================== 2b. buteurs (une fois par jour)
 MAXI = "https://www.maxifoot.fr/classement-buteur-europe-2{}.htm"
 sc_state = state.get("scorers") or {}
-if not sc_state.get("at") or (NOW - dt(sc_state["at"])).total_seconds() > 20 * 3600:
+if sc_state.get("v") != 2 or not sc_state.get("at") or (NOW - dt(sc_state["at"])).total_seconds() > 20 * 3600:
     cur, prev, src = [], [], None
     for code in ("PL", "PD", "SA", "BL1", "FL1", "CL"):       # source officielle d'abord
         r = fd.scorers(C.COMPETITIONS[code]["fd"], season)
         if r is None:
             cur = []
             break
-        cur += r
+        cur += [dict(x, comp=code) for x in r]
     if cur:
         src = "football-data"
         for code in ("PL", "PD", "SA", "BL1", "FL1", "CL"):
-            prev += fd.scorers(C.COMPETITIONS[code]["fd"], season - 1) or []
+            prev += [dict(x, comp=code) for x in fd.scorers(C.COMPETITIONS[code]["fd"], season - 1) or []]
     else:                                                     # sinon Maxifoot (robots.txt respecté)
         cur = S.maxifoot_scorers(MAXI.format(""))
         prev = S.maxifoot_scorers(MAXI.format(f"-{season}")) if cur else []
         src = "maxifoot" if cur else None
-    sc_state = state["scorers"] = {"at": NOW.isoformat(), "src": src, "cur": cur, "prev": prev}
+    sc_state = state["scorers"] = {"v": 2, "at": NOW.isoformat(), "src": src, "cur": cur, "prev": prev}
+
+DOMESTIC_TEAMS = {m[x] for code, rows in fd_matches.items() if C.COMPETITIONS[code]["domestic"]
+                  for m in rows for x in ("home", "away")}
 
 
 def _agg(rows):
-    """(joueur, équipe FD) -> buts, matchs (sommés sur les compétitions pour football-data)."""
+    """(joueur, équipe FD) -> buts, matchs (sommés sur les compétitions pour football-data).
+
+    Le classement ne liste que les meilleurs buteurs de chaque compétition : un joueur de grand
+    championnat présent seulement dans celui de la LDC (3 buts en 3 matchs) aurait l'air d'un
+    serial buteur alors qu'il marque peu en championnat. On ne le garde que s'il figure aussi
+    parmi les buteurs de son championnat.
+    """
+    def team_of(r):
+        return r["team"] if r["team"] in crests else fd_team_match.find(r["team"], 0.78)
+    in_league = {(norm(r["player"]), team_of(r)) for r in rows if r.get("comp") not in ("CL", None)}
     out = {}
     for r in rows:
-        team = r["team"] if r["team"] in crests else fd_team_match.find(r["team"], 0.78)
+        team = team_of(r)
         if not team or not r["player"]:
             continue
         k = (norm(r["player"]), team)
+        if r.get("comp") == "CL" and team in DOMESTIC_TEAMS and k not in in_league:
+            continue
         a = out.setdefault(k, {"name": r["player"], "team": team, "goals": 0, "matches": 0})
         a["goals"] += r["goals"]
         a["matches"] += r["matches"]
@@ -198,7 +212,7 @@ for (pn, _), a in _agg(sc_state.get("prev", [])).items():   # saison précédent
     p["matches"] += a["matches"]
 scorers_by_team = defaultdict(list)
 for (pn, team), a in scorer_cur.items():
-    if a["matches"] >= 3:
+    if a["matches"] >= 5 or scorer_prev.get(pn, {}).get("matches", 0) >= 10:
         scorers_by_team[team].append({**a, "pg": scorer_prev.get(pn, {}).get("goals", 0),
                                       "pm": scorer_prev.get(pn, {}).get("matches", 0)})
 

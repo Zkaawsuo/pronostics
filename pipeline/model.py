@@ -241,11 +241,11 @@ def shots_coefs(rows):
 
 
 # ---------------------------------------------------------------- buteurs
-def scorer_prob(goals, matches, team_ratio, prev_goals=0, prev_matches=0, prior=0.40, k=8, avail=1.0):
+def scorer_prob(goals, matches, team_ratio, prev_goals=0, prev_matches=0, prior=0.30, k=10, avail=1.0):
     """Chance qu'un joueur marque au moins un but dans le match.
 
     - rythme du joueur : ses buts par match, saison en cours + moitié de la précédente, tiré vers
-      0,40 but/match (k matchs fictifs) pour ne pas s'emballer sur une série de 10 matchs ;
+      0,30 but/match (10 matchs fictifs) pour ne pas s'emballer sur une petite série ;
     - ajusté par les buts attendus de son équipe ce jour-là par rapport à sa moyenne ;
     - proba « s'il joue » : chez les bookmakers français, un pari buteur est en général remboursé
       si le joueur ne participe pas (avail permet de baisser si besoin).
