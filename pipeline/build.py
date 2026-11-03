@@ -124,6 +124,7 @@ if C.FD_KEY and not any(fd_matches.values()):
     meta.update({"warnings": S.LOG[-30:], "stale_since": meta.get("stale_since") or NOW.isoformat(),
                  "checked": NOW.isoformat()})
     save("meta.json", meta)
+    save("state.json", state)   # garde le délai avant de réessayer Understat
     raise SystemExit(0)
 
 # ======================================================================== 2. historique des équipes
