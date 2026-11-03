@@ -115,6 +115,8 @@ for code, comp in C.COMPETITIONS.items():
 # ======================================================================== 2. historique des équipes
 team_games = defaultdict(list)   # nom FD -> matchs joués (toutes compétitions FD)
 crests, shorts = {}, {}
+for code in fd_matches:   # matchs de phase finale dont les équipes ne sont pas encore connues
+    fd_matches[code] = [m for m in fd_matches[code] if m["home"] and m["away"]]
 for code, rows in fd_matches.items():
     for m in rows:
         crests[m["home"]], crests[m["away"]] = m["home_crest"], m["away_crest"]
@@ -219,7 +221,7 @@ for code, rows in fd_matches.items():
                              "stage": m.get("stage"), "fd_id": m["fd_id"]})
 for code, evs in cup_events.items():
     for e in evs:
-        if NOW - timedelta(hours=2) <= dt(e["commence_time"]) <= horizon:
+        if e.get("home_team") and e.get("away_team") and NOW - timedelta(hours=2) <= dt(e["commence_time"]) <= horizon:
             h = fd_team_match.find(e["home_team"], 0.82) or e["home_team"]
             a = fd_team_match.find(e["away_team"], 0.82) or e["away_team"]
             upcoming.append({"comp": code, "date": e["commence_time"], "home": h, "away": a,
