@@ -2,9 +2,15 @@
 import numpy as np
 from scipy.optimize import minimize
 from scipy.special import gammaln
-from scipy.stats import poisson
 
 MAXG = 10
+_K = np.arange(MAXG)
+_FACT = np.array([float(np.prod(np.arange(1, k + 1))) for k in range(MAXG)])
+
+
+def _pois(lam):
+    """Loi de Poisson sur 0..MAXG-1 (bien plus rapide que scipy.stats pour un petit vecteur)."""
+    return np.exp(-lam) * np.power(lam, _K) / _FACT
 
 
 # ---------------------------------------------------------------- Dixon-Coles
@@ -40,6 +46,7 @@ class DixonColes:
         ai = np.array([idx[t] for t in away])
         yh, ya, w = np.asarray(yh, float), np.asarray(ya, float), np.asarray(weights, float)
         n = len(teams)
+        const = w * (gammaln(yh + 1) + gammaln(ya + 1))
 
         def unpack(p):
             att = p[:n] - p[:n].mean()
@@ -51,7 +58,7 @@ class DixonColes:
             lh = base + home_adv + att[hi] + dfn[ai]
             la = base + att[ai] + dfn[hi]
             el, ea = np.exp(lh), np.exp(la)
-            ll = w * (yh * lh - el - gammaln(yh + 1) + ya * la - ea - gammaln(ya + 1))
+            ll = w * (yh * lh - el + ya * la - ea) - const
             pen = self.ridge * (np.sum(att ** 2) + np.sum(dfn ** 2))
             rh, ra = w * (yh - el), w * (ya - ea)
             g_att = np.bincount(hi, rh, n) + np.bincount(ai, ra, n)
@@ -100,8 +107,7 @@ class DixonColes:
 
 # ---------------------------------------------------------------- matrice de scores
 def score_matrix(lam, mu, rho=-0.05):
-    g = np.arange(MAXG)
-    m = np.outer(poisson.pmf(g, lam), poisson.pmf(g, mu))
+    m = np.outer(_pois(lam), _pois(mu))
     m[0, 0] *= max(1 - lam * mu * rho, 1e-6)
     m[1, 0] *= max(1 + mu * rho, 1e-6)
     m[0, 1] *= max(1 + lam * rho, 1e-6)

@@ -7,7 +7,13 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
-const S = { data: null, perf: null, meta: null, comp: store.get("comp", "ALL"), day: "all", conf: 0, combo: store.get("combo", []) };
+const S = { data: null, perf: null, meta: null, tickets: null, comp: store.get("comp", "ALL"), day: "all", conf: 0,
+  combo: store.get("combo", []), book: store.get("book", null), stake: store.get("stake", "5") };
+const fmtWhen = (iso) => { const d = new Date(iso); return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
+const n2 = (x) => Number(x).toFixed(2).replace(".", ",");
+const dec = (x) => String(x).replace(".", ",");
+const euro = (x) => x.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), 1800); }
 
 async function getJSON(path) {
   const r = await fetch(path + "?t=" + Date.now());
@@ -19,19 +25,21 @@ async function init() {
   bindUI();
   $("#match-list").innerHTML = '<div class="skeleton"></div>'.repeat(4);
   try {
-    [S.data, S.perf, S.meta] = await Promise.all([getJSON("data/matches.json"), getJSON("data/performance.json"), getJSON("data/meta.json").catch(() => null)]);
+    [S.data, S.perf, S.meta, S.tickets] = await Promise.all([getJSON("data/matches.json"), getJSON("data/performance.json"),
+      getJSON("data/meta.json").catch(() => null), getJSON("data/tickets.json").catch(() => null)]);
   } catch {
     $("#match-list").innerHTML = '<p class="empty">Pas encore de données. Le premier calcul automatique arrive dans quelques minutes.</p>';
     $("#updated").textContent = "En attente";
     return;
   }
   $("#updated").textContent = "Mis à jour " + relTime(S.data.generated);
-  renderChips(); renderMatches(); renderCombo(); renderPerf();
+  renderChips(); renderMatches(); renderTickets(); renderCombo(); renderPerf();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
 function relTime(iso) {
   const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (m < 1) return "à l'instant";
   if (m < 60) return `il y a ${m} min`;
   if (m < 1440) return `il y a ${Math.round(m / 60)} h`;
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
@@ -52,6 +60,9 @@ function bindUI() {
     });
   }
   $("#sheet-bg").addEventListener("click", closeSheet);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+  $("#stake-in").value = S.stake;
+  $("#stake-in").addEventListener("input", (e) => { S.stake = e.target.value; store.set("stake", S.stake); renderTickets(); });
 }
 
 // ------------------------------------------------------------------ liste
@@ -118,7 +129,7 @@ function cardHTML(m) {
       <span class="tag conf${m.confidence}">● ${confTxt}</span>
       <span class="tag">+2,5 <b>${pct(f["over_2.5"])}</b></span>
       <span class="tag">BTTS <b>${pct(f.btts)}</b></span>
-      ${m.best_odds ? `<span class="tag">Cote ${m.pick === "home" ? "1" : m.pick === "draw" ? "N" : "2"} <b>${m.best_odds[m.pick[0]].odd.toFixed(2)}</b></span>` : ""}
+      ${m.best_odds ? `<span class="tag">Cote ${m.pick === "home" ? "1" : m.pick === "draw" ? "N" : "2"} <b>${n2(m.best_odds[m.pick[0]].odd)}</b></span>` : ""}
       ${gap ? '<span class="tag gap">Écart modèle / marché</span>' : ""}
     </div>
   </article>`;
@@ -136,11 +147,11 @@ function openSheet(key) {
   const inC = (sel) => S.combo.some((x) => x.id === m.key + "|" + sel) ? "in" : "";
   const addBtn = (sel, lbl, p) => `<button class="add ${inC(sel)}" data-sel="${sel}">${lbl}<b>${pct(p)}</b></button>`;
 
-  $("#sheet").innerHTML = `<div class="grab"></div>
+  $("#sheet").innerHTML = `<div class="grab"></div><button class="close" aria-label="Fermer">×</button>
     <div class="meta"><span>${c.flag} ${esc(c.name)}</span><span>${d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
     <div class="big-teams">
       <div>${crest(m.home.crest, m.home.name)}<div class="n">${esc(m.home.name)}</div><div class="elo">${m.home.elo ? "Elo " + m.home.elo : ""}</div></div>
-      <div class="xgline">${m.xg[0]} – ${m.xg[1]}<small>buts attendus</small></div>
+      <div class="xgline">${dec(m.xg[0])} – ${dec(m.xg[1])}<small>buts attendus</small></div>
       <div>${crest(m.away.crest, m.away.name)}<div class="n">${esc(m.away.name)}</div><div class="elo">${m.away.elo ? "Elo " + m.away.elo : ""}</div></div>
     </div>
     ${bar(f, m.pick)}
@@ -155,13 +166,13 @@ function openSheet(key) {
       <tr><td>Les 2 marquent</td><td>${pct(mo.btts)}</td><td>–</td><td class="hl">${pct(f.btts)}</td></tr>
       <tr><td>+1,5 / +3,5 buts</td><td>${pct(mo["over_1.5"])} / ${pct(mo["over_3.5"])}</td><td>–</td><td></td></tr>
     </table>
-    <p class="src" style="margin-top:6px">Finale = ${mk ? "60 % marché + 40 % modèle" : "modèle seul (pas de cotes)"}. Scores les plus probables : ${m.scores.map((s) => `${s.score} (${pct(s.p)})`).join(", ")}</p>
+    <p class="src" style="margin-top:6px">Finale = ${mk ? `${Math.round(W().market * 100)} % marché + ${100 - Math.round(W().market * 100)} % modèle` : "modèle seul (pas de cotes)"}. Scores les plus probables : ${m.scores.map((s) => `${s.score} (${pct(s.p)})`).join(", ")}</p>
 
     ${m.books.length ? `<h3>Cotes ${mk ? "· relevées " + relTime(mk.at) : ""}</h3>
     <table><tr><th></th><th>1</th><th>N</th><th>2</th><th>Marge</th></tr>
-      ${m.books.map((b) => `<tr><td>${esc(b.book)}</td><td>${b.h.toFixed(2)}</td><td>${b.d.toFixed(2)}</td><td>${b.a.toFixed(2)}</td><td>${b.margin} %</td></tr>`).join("")}
+      ${m.books.map((b) => `<tr><td>${esc(b.book)}</td><td>${n2(b.h)}</td><td>${n2(b.d)}</td><td>${n2(b.a)}</td><td>${dec(b.margin)} %</td></tr>`).join("")}
     </table>
-    ${m.value ? `<p class="note">La meilleure cote (${m.value.odd} chez ${esc(m.value.book)}) dépasse d'environ ${m.value.ev} % la proba finale. Un écart vient souvent d'une info que le modèle n'a pas (compo, blessure).</p>` : ""}` : ""}
+    ${m.value ? `<p class="note">La meilleure cote (${n2(m.value.odd)} chez ${esc(m.value.book)}) dépasse d'environ ${m.value.ev} % la proba finale. Un écart vient souvent d'une info que le modèle n'a pas (compo, blessure).</p>` : ""}` : ""}
 
     <h3>Forme (5 derniers)</h3>
     <div class="twocol"><div><div class="lbl">${esc(m.home.name)}</div>${form(m.home)}</div><div><div class="lbl">${esc(m.away.name)}</div>${form(m.away)}</div></div>
@@ -180,12 +191,97 @@ function openSheet(key) {
     </div>
     ${disclaimer()}`;
   $("#sheet").onclick = (e) => {
+    if (e.target.closest(".close")) { closeSheet(); return; }
     const b = e.target.closest(".add"); if (!b) return;
     toggleCombo(m, b.dataset.sel); b.classList.toggle("in");
   };
   $("#sheet").classList.add("on"); $("#sheet-bg").classList.add("on"); $("#sheet").scrollTop = 0;
 }
 function closeSheet() { $("#sheet").classList.remove("on"); $("#sheet-bg").classList.remove("on"); }
+
+const W = () => (S.data && S.data.weights) || { market: 0.6, xg: 0.55, xi: 0.003, elo: 0.3 };
+
+// ------------------------------------------------------------------ tickets
+function renderTickets() {
+  const T = S.tickets;
+  if (!T || !T.books || !T.books.length) {
+    $("#book-chips").innerHTML = "";
+    $("#tickets").innerHTML = '<p class="empty">Pas encore de tickets.<br>Il faut des cotes (clé ODDS_KEY) et des matchs dans les prochains jours.</p>';
+    $("#tickets-track").innerHTML = trackHTML();
+    return;
+  }
+  if (!S.book || !T.books.includes(S.book)) S.book = T.books[0];
+  $("#book-chips").innerHTML = T.books.map((b) => `<button class="chip ${b === S.book ? "on" : ""}" data-b="${esc(b)}">${esc(b)}</button>`).join("");
+  $("#book-chips").onclick = (e) => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    S.book = c.dataset.b; store.set("book", S.book); renderTickets();
+  };
+  const res = T.by_book[S.book] || {};
+  $("#tickets").innerHTML = Object.entries(T.formulas).map(([fid, fm]) => ticketHTML(fid, fm, res[fid])).join("") +
+    `<p class="src tnote">Rendement moyen = ce que le ticket rapporte en moyenne par euro misé, d'après les probas de l'app. Négatif = la marge du bookmaker l'emporte : c'est le cas le plus fréquent. Les cotes marquées ≈ (double chance) sont estimées : vérifie-les chez ${esc(S.book)}.</p>`;
+  $("#tickets").onclick = (e) => {
+    const b = e.target.closest(".copy"); if (!b) return;
+    copyTicket(b.dataset.f);
+  };
+  $("#tickets-track").innerHTML = trackHTML();
+}
+
+function ticketHTML(fid, fm, t) {
+  const head = (odds) => `<header><span class="tname">${fm.emoji} ${esc(fm.name)}</span>${odds ? `<span class="todds">${n2(odds)}</span>` : ""}</header><p class="tpitch">${esc(fm.pitch)}</p>`;
+  if (!t) return `<article class="ticket t-${fid}">${head()}<p class="src">Pas de combinaison crédible dans cette fourchette de cote avec les matchs à venir chez ${esc(S.book)}.</p></article>`;
+  const now = Date.now();
+  const started = t.legs.some((l) => new Date(l.date) <= now);
+  const stake = parseFloat(String(S.stake).replace(",", ".")) || 0;
+  const flag = (c) => (S.data && S.data.competitions[c] ? S.data.competitions[c].flag : "");
+  const legs = t.legs.map((l) => `<li class="${new Date(l.date) <= now ? "past" : ""}">
+      <div><span class="lsel">${esc(l.label)}</span><small>${flag(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)}</small></div>
+      <div class="lright"><b>${l.est ? "≈" : ""}${n2(l.odd)}</b><small>${pct(l.p)}</small></div></li>`).join("");
+  const ev = Math.round(t.ev * 100);
+  return `<article class="ticket t-${fid}">${head(t.odds)}
+    <div class="tstats">
+      <div><b>${pct(t.p)}</b><small>de chances</small></div>
+      <div><b>1 sur ${Math.max(1, Math.round(1 / t.p))}</b><small>passe environ</small></div>
+      <div><b class="${ev >= 0 ? "pos" : "neg"}">${ev >= 0 ? "+" : ""}${ev} %</b><small>rendement moyen</small></div>
+    </div>
+    <ul class="legs">${legs}</ul>
+    ${started ? '<p class="note">⚠ Un match a déjà commencé : ce ticket n\'est plus jouable tel quel. Il sera remplacé au prochain calcul.</p>' : ""}
+    ${t.window_h > 48 ? `<p class="src">Pas assez de matchs dans les 48 h : ticket élargi aux ${t.window_h} h.</p>` : ""}
+    <div class="tfoot"><span class="src">${stake ? `${euro(stake)} → <b>${euro(stake * t.odds)}</b> si ça passe` : "Indique une mise"}</span>
+      <button class="copy" data-f="${fid}">Copier</button></div>
+  </article>`;
+}
+
+function copyTicket(fid) {
+  const T = S.tickets, fm = T.formulas[fid], t = (T.by_book[S.book] || {})[fid];
+  if (!t) return;
+  const txt = `${fm.emoji} Ticket ${fm.name} (${S.book}) – cote ${n2(t.odds)} – ${pct(t.p)} de chances\n` +
+    t.legs.map((l) => `• ${l.label} (${l.match}, ${fmtWhen(l.date)}) @${l.est ? "≈" : ""}${n2(l.odd)}`).join("\n");
+  const done = () => toast("Ticket copié");
+  if (navigator.clipboard) navigator.clipboard.writeText(txt).then(done).catch(() => window.prompt("Copie le ticket :", txt));
+  else window.prompt("Copie le ticket :", txt);
+}
+
+function trackHTML() {
+  const T = S.tickets, tr = T && T.tracking;
+  const intro = `<h3 class="day">Suivi des tickets${T && T.track_book ? " · " + esc(T.track_book) : ""}</h3>
+    <p class="src" style="margin-bottom:8px">Chaque ticket est figé au coup d'envoi de son 1er match, puis réglé avec les scores. Ça montre ce qu'ils auraient vraiment rapporté.</p>`;
+  if (!tr || !tr.recent.length) return intro + '<p class="src">Le suivi démarre : premiers résultats après les prochains matchs.</p>';
+  const rows = Object.entries(T.formulas).map(([fid, fm]) => {
+    const s = tr.by_formula[fid];
+    if (!s) return `<div class="trow"><span class="tn">${fm.emoji} ${esc(fm.name)}</span><span class="src">pas encore réglé</span></div>`;
+    const roi = Math.round(s.roi * 100);
+    return `<div class="trow"><span class="tn">${fm.emoji} ${esc(fm.name)}</span>
+      <b class="${roi >= 0 ? "pos" : "neg"}">${roi >= 0 ? "+" : ""}${roi} %</b>
+      <small class="src">${s.won} passé${s.won > 1 ? "s" : ""} sur ${s.n} · ${pct(s.hit)} (attendu ${pct(s.expected)})</small></div>`;
+  }).join("");
+  const icon = { won: "✓", lost: "✗", pending: "⏳" };
+  const recent = tr.recent.map((t) => {
+    const fm = T.formulas[t.formula] || { emoji: "", name: t.formula };
+    return `<div class="res"><span>${fm.emoji} ${fmtWhen(t.first)} · ${t.legs.length} sél. · cote ${n2(t.odds)}</span>
+      <span class="${t.status === "won" ? "ok" : t.status === "lost" ? "ko" : ""}">${icon[t.status] || ""}</span></div>`;
+  }).join("");
+  return intro + `<div class="tsum">${rows}</div><p class="src" style="margin:6px 0 4px">En couleur : rendement réel si tu avais misé 1 € sur chaque ticket.</p>${recent}`;
+}
 
 // ------------------------------------------------------------------ combiné
 const SEL_LBL = { home: "Victoire dom.", draw: "Match nul", away: "Victoire ext.", over: "+2,5 buts", under: "−2,5 buts", btts: "Les 2 marquent" };
@@ -217,7 +313,7 @@ function renderCombo() {
     ${live.map((s) => `<div class="sel"><div>${esc(SEL_LBL[s.sel])}<small>${esc(s.label)}</small></div><div style="display:flex;align-items:center;gap:8px"><span class="pct" style="font-size:20px;font-weight:700">${pct(selProb(s.m, s.sel))}</span><button class="x" data-id="${esc(s.id)}">×</button></div></div>`).join("")}
     <div class="kpis">
       <div class="kpi"><div class="v">${p >= 0.01 ? Math.round(p * 1000) / 10 + " %" : "< 1 %"}</div><div class="l">Chance que tout passe</div></div>
-      <div class="kpi"><div class="v">${fair.toFixed(2)}</div><div class="l">Cote « juste » (sans marge)</div></div>
+      <div class="kpi"><div class="v">${n2(fair)}</div><div class="l">Cote « juste » (sans marge)</div></div>
     </div>
     <div class="input"><span class="src">Cote proposée</span><input id="odd-in" inputmode="decimal" placeholder="ex : 12,50" value="${esc(saved)}"></div>
     <div id="verdict"></div>
@@ -282,6 +378,8 @@ function renderPerf() {
     ${bt && bt.baseline ? `<p class="src" style="margin-top:8px">Référence = prono naïf qui donne toujours les fréquences moyennes (${Math.round(bt.baseline.accuracy * 100)} % de réussite). Le modèle doit faire mieux pour valoir quelque chose.</p>` : ""}
     ${bt && bt.all ? calChart(bt.all.calibration) : ""}
 
+    ${tuningHTML()}
+
     ${res ? `<h3 class="day">Derniers résultats</h3>${res}` : ""}
 
     <h3 class="day">Sources de données</h3>
@@ -294,6 +392,21 @@ function renderPerf() {
     </ul>
     ${meta && meta.warnings.length ? `<details style="margin-top:10px"><summary class="src">Journal technique (${meta.warnings.length})</summary><ul class="src">${meta.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""}
     ${disclaimer()}`;
+}
+
+function tuningHTML() {
+  const w = (S.perf && S.perf.weights) || W(), bt = S.perf && S.perf.backtest;
+  const half = Math.round(Math.log(2) / w.xi);
+  const grid = bt && bt.grid && bt.grid.length ? `<table style="margin-top:8px"><tr><th>xG</th><th>Mémoire</th><th>Elo</th><th>Log loss</th><th>1N2</th></tr>
+    ${bt.grid.slice(0, 5).map((g) => `<tr><td>${Math.round(g.xg * 100)} %</td><td>${Math.round(Math.log(2) / g.xi)} j</td><td>${Math.round(g.elo * 100)} %</td><td>${g.logloss}</td><td>${pct(g.accuracy)}</td></tr>`).join("")}</table>` : "";
+  return `<h3 class="day">Réglages automatiques</h3>
+    <p class="src">Chaque semaine, l'app teste plusieurs réglages sur les 12 dernières semaines et garde le meilleur, seulement s'il fait nettement mieux.</p>
+    <ul class="src" style="margin-top:6px">
+      <li>Part des xG : <b>${Math.round(w.xg * 100)} %</b> (le reste = vrais buts)</li>
+      <li>Mémoire du modèle : un match compte moitié moins après <b>${half} jours</b></li>
+      <li>Part de l'Elo : <b>${Math.round(w.elo * 100)} %</b></li>
+      <li>Part du marché dans la proba finale : <b>${Math.round(w.market * 100)} %</b>${w.market_tuned ? " (appris sur tes pronos vérifiés)" : " (réglage de départ, ajusté dès 150 matchs vérifiés)"}</li>
+    </ul>${grid}`;
 }
 
 function disclaimer() {

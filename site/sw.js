@@ -1,5 +1,5 @@
 // Coque de l'app en cache, données toujours récupérées en priorité sur le réseau.
-const CACHE = "pronos-v2";
+const CACHE = "pronos-v3";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
@@ -9,7 +9,9 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  const key = url.origin + url.pathname;   // une seule entrée par fichier, quel que soit le ?t=
   e.respondWith(fetch(e.request).then((r) => {
-    const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r;
-  }).catch(() => caches.match(e.request, { ignoreSearch: true })));
+    if (r.ok) { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(key, copy)); }
+    return r;
+  }).catch(() => caches.match(key)));
 });

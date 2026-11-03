@@ -1,9 +1,11 @@
-"""Pipeline complet : collecte -> modèle -> pronostics -> suivi de fiabilité -> JSON pour l'app.
+"""Pipeline complet : collecte -> auto-réglage -> modèle -> pronostics -> tickets -> suivi -> JSON pour l'app.
 
 Lancé automatiquement par GitHub Actions. Écrit dans site/data/.
 """
 import json
 import math
+import os
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,10 +14,12 @@ import numpy as np
 
 import config as C
 import sources as S
+import tickets as T
+from build_utils import dt
 from model import DixonColes, devig, elo_rates, markets_from_matrix, score_matrix
 from names import Matcher, norm
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.fromisoformat(os.environ["PRONOS_NOW"]) if os.getenv("PRONOS_NOW") else datetime.now(timezone.utc)
 DATA = Path(__file__).resolve().parent.parent / "site" / "data"
 DATA.mkdir(parents=True, exist_ok=True)
 
@@ -34,10 +38,6 @@ def save(name, obj):
     (DATA / name).write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
 
 
-def dt(s):
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
 def mkey(comp, date, home, away):
     return f"{comp}:{date[:10]}:{norm(home)}:{norm(away)}"
 
@@ -46,9 +46,44 @@ def r3(x):
     return None if x is None else round(float(x), 3)
 
 
+def book_name(title):
+    return re.sub(r"\s*\((FR|EU)\)\s*$", "", title or "").strip()
+
+
+def metrics(rows, key="p"):
+    rows = [r for r in rows if r.get(key) and r.get("result")]
+    if not rows:
+        return None
+    acc = ll = br = 0.0
+    bins = [[0, 0.0, 0] for _ in range(10)]
+    for r in rows:
+        hg, ag = r["result"]
+        o = 0 if hg > ag else 1 if hg == ag else 2
+        p = [max(min(x, 0.999), 0.001) for x in r[key]]
+        acc += int(np.argmax(p) == o)
+        ll -= math.log(p[o])
+        br += sum((p[i] - (i == o)) ** 2 for i in range(3))
+        for i in range(3):
+            b = min(int(p[i] * 10), 9)
+            bins[b][0] += 1; bins[b][1] += p[i]; bins[b][2] += int(i == o)
+    n = len(rows)
+    return {"n": n, "accuracy": round(acc / n, 3), "logloss": round(ll / n, 4), "brier": round(br / n, 3),
+            "calibration": [{"pred": round(b[1] / b[0], 3), "real": round(b[2] / b[0], 3), "n": b[0]}
+                            for b in bins if b[0] >= 5]}
+
+
+def blend_elo(lam, mu, elo_h, elo_a, w, neutral=False):
+    if not w or elo_h is None or elo_a is None:
+        return lam, mu
+    el, em = elo_rates(elo_h, elo_a, lam + mu, C.ELO_HOME_ADV, neutral)
+    return (math.exp((1 - w) * math.log(lam) + w * math.log(el)),
+            math.exp((1 - w) * math.log(mu) + w * math.log(em)))
+
+
 # ======================================================================== 1. collecte
 state = load("state.json", {})
 history = load("history.json", {})
+tuned = state.setdefault("tuned", {})
 fd = S.FootballData(C.FD_KEY)
 odds_api = S.Odds(C.ODDS_KEY)
 season = S.season_start(NOW)
@@ -135,7 +170,6 @@ for v in team_xg.values():
 
 
 def xg_lookup(code, m):
-    day = m["date"][:10]
     for dd in (0, -1, 1):
         d2 = (dt(m["date"]) + timedelta(days=dd)).strftime("%Y-%m-%d")
         hit = xg_by_match.get((code, d2, m["home"], m["away"]))
@@ -144,49 +178,238 @@ def xg_lookup(code, m):
     return None
 
 
-# ======================================================================== 4. modèles par championnat
-models = {}
+# tables des matchs joués, préparées une fois (servent à l'ajustement et au test glissant)
+league_table = {}
+for code, rows in fd_matches.items():
+    if not C.COMPETITIONS[code]["domestic"]:
+        continue
+    league_table[code] = [{"d": dt(m["date"]), "home": m["home"], "away": m["away"], "hg": m["hg"],
+                           "ag": m["ag"], "x": xg_lookup(code, m)}
+                          for m in rows if m["status"] == "FINISHED" and m["hg"] is not None]
 
 
-def fit_league(rows, code, cutoff=None, use_xg=True):
-    H, A, YH, YA, W, GH, GA = [], [], [], [], [], [], []
+def fit_league(code, cutoff=None, xg_w=None, xi=None):
+    xg_w = tuned.get("xg_weight", C.XG_WEIGHT) if xg_w is None else xg_w
+    xi = tuned.get("xi", C.TIME_DECAY_XI) if xi is None else xi
     ref = cutoff or NOW
-    for m in rows:
-        if m["status"] != "FINISHED" or m["hg"] is None:
+    H, A, YH, YA, W, GH, GA = [], [], [], [], [], [], []
+    for m in league_table.get(code, []):
+        if m["d"] >= ref:
             continue
-        d = dt(m["date"])
-        if d >= ref:
-            continue
-        age = (ref - d).days
         yh, ya = float(m["hg"]), float(m["ag"])
-        x = xg_lookup(code, m) if use_xg else None
-        if x:
-            yh = C.XG_WEIGHT * x[0] + (1 - C.XG_WEIGHT) * yh
-            ya = C.XG_WEIGHT * x[1] + (1 - C.XG_WEIGHT) * ya
+        if m["x"]:
+            yh = xg_w * m["x"][0] + (1 - xg_w) * yh
+            ya = xg_w * m["x"][1] + (1 - xg_w) * ya
         H.append(m["home"]); A.append(m["away"]); YH.append(yh); YA.append(ya)
-        W.append(math.exp(-C.TIME_DECAY_XI * age)); GH.append(m["hg"]); GA.append(m["ag"])
+        W.append(math.exp(-xi * (ref - m["d"]).days)); GH.append(m["hg"]); GA.append(m["ag"])
     if len(H) < 60:
         return None
     return DixonColes().fit(H, A, YH, YA, W, GH, GA)
 
 
-for code, comp in C.COMPETITIONS.items():
-    if comp["domestic"] and fd_matches.get(code):
-        mdl = fit_league(fd_matches[code], code)
-        if mdl:
-            mdl.league = code
-            models[code] = mdl
-        else:
-            S.log(f"Pas assez de matchs pour {code}")
+# ======================================================================== 4. calendrier à venir
+horizon = NOW + timedelta(days=C.HORIZON_DAYS)
+upcoming = []
+for code, rows in fd_matches.items():
+    for m in rows:
+        if m["status"] in ("SCHEDULED", "TIMED") and NOW - timedelta(hours=2) <= dt(m["date"]) <= horizon:
+            upcoming.append({"comp": code, "date": m["date"], "home": m["home"], "away": m["away"],
+                             "home_name": m["home_short"], "away_name": m["away_short"],
+                             "home_crest": m["home_crest"], "away_crest": m["away_crest"],
+                             "stage": m.get("stage"), "fd_id": m["fd_id"]})
+for code, evs in cup_events.items():
+    for e in evs:
+        if NOW - timedelta(hours=2) <= dt(e["commence_time"]) <= horizon:
+            h = fd_team_match.find(e["home_team"], 0.82) or e["home_team"]
+            a = fd_team_match.find(e["away_team"], 0.82) or e["away_team"]
+            upcoming.append({"comp": code, "date": e["commence_time"], "home": h, "away": a,
+                             "home_name": shorts.get(h, e["home_team"]), "away_name": shorts.get(a, e["away_team"]),
+                             "home_crest": crests.get(h, ""), "away_crest": crests.get(a, ""),
+                             "stage": None, "odds_id": e["id"]})
+upcoming.sort(key=lambda x: x["date"])
 
+# ======================================================================== 5. cotes (politique économe en crédits)
+odds_cache = state.get("odds_cache", {})
+last_by = state.get("odds_last_by_comp", {})
+if C.ODDS_KEY:
+    for code, comp in C.COMPETITIONS.items():
+        ups = [u for u in upcoming if u["comp"] == code and dt(u["date"]) > NOW]
+        if not ups:
+            continue
+        hot = any(dt(u["date"]) <= NOW + timedelta(hours=C.ODDS_HOT_H) for u in ups)
+        age = (NOW - dt(last_by[code])).total_seconds() / 3600 if code in last_by else 1e9
+        if not ((hot and age >= C.ODDS_HOT_REFRESH_H) or age >= C.ODDS_WARM_REFRESH_H):
+            continue
+        rem = odds_api.remaining
+        if rem is not None and rem < C.ODDS_STOP_CREDITS:
+            S.log("Quota de cotes presque épuisé : relevés suspendus jusqu'au renouvellement")
+            break
+        low = rem is not None and rem < C.ODDS_LOW_CREDITS
+        if low and not hot:
+            continue
+        evs = odds_api.odds(comp["odds"], C.HORIZON_DAYS * 24, markets="h2h" if low else "h2h,totals")
+        last_by[code] = NOW.isoformat()
+        for e in evs:
+            ed = dt(e["commence_time"])
+            target = next((u for u in ups if u.get("odds_id") == e["id"]), None)
+            if not target:
+                for u in ups:
+                    if abs((dt(u["date"]) - ed).total_seconds()) < 36 * 3600 and \
+                            Matcher([u["home"], u["home_name"]]).find(e["home_team"], 0.75) and \
+                            Matcher([u["away"], u["away_name"]]).find(e["away_team"], 0.75):
+                        target = u
+                        break
+            if not target:
+                continue
+            books, totals = [], []
+            for b in e.get("bookmakers", []):
+                name = book_name(b.get("title"))
+                for mk in b.get("markets", []):
+                    oc = {o["name"]: o for o in mk.get("outcomes", [])}
+                    if mk["key"] == "h2h" and "Draw" in oc:
+                        ph = oc.get(e["home_team"], {}).get("price")
+                        pa = oc.get(e["away_team"], {}).get("price")
+                        if ph and pa:
+                            books.append({"book": name, "h": ph, "d": oc["Draw"]["price"], "a": pa})
+                    if mk["key"] == "totals":
+                        ov = [o for o in mk["outcomes"] if o.get("point") == 2.5]
+                        if len(ov) == 2:
+                            o = {x["name"]: x["price"] for x in ov}
+                            totals.append({"book": name, "over": o.get("Over"), "under": o.get("Under")})
+            if books:
+                k = mkey(target["comp"], target["date"], target["home"], target["away"])
+                if not totals and k in odds_cache:   # relevé sans +/- 2,5 : on garde les anciens
+                    totals = odds_cache[k].get("totals", [])
+                odds_cache[k] = {"at": NOW.isoformat(), "h2h": books, "totals": totals}
+    # résultats des coupes hors football-data (2 crédits par compétition, seulement si utile)
+    last_sc = state.setdefault("scores_last_by_comp", {})
+    for code, comp in C.COMPETITIONS.items():
+        if comp["fd"] is not None:
+            continue
+        need = any(h["comp"] == code and not h.get("result") and
+                   NOW - timedelta(days=3) < dt(h["date"]) < NOW - timedelta(hours=2) for h in history.values())
+        age = (NOW - dt(last_sc[code])).total_seconds() / 3600 if code in last_sc else 1e9
+        rem = odds_api.remaining
+        if need and age >= 18 and (rem is None or rem >= C.ODDS_STOP_CREDITS):
+            last_sc[code] = NOW.isoformat()
+            for sc in odds_api.scores(comp["odds"], 3):
+                if sc.get("completed") and sc.get("scores"):
+                    sm = {s["name"]: int(s["score"]) for s in sc["scores"]}
+                    state.setdefault("cup_results", {})[sc["id"]] = [sm.get(sc["home_team"]), sm.get(sc["away_team"])]
+state["odds_last_by_comp"] = last_by
+state["odds_cache"] = {k: v for k, v in odds_cache.items() if (NOW - dt(v["at"])).days < 6}
+if odds_api.remaining is not None:
+    state["odds_remaining"] = odds_api.remaining
+state["cup_results"] = dict(list(state.get("cup_results", {}).items())[-600:])
+
+# ======================================================================== 6. résultats des pronos passés
+fd_results = {m["fd_id"]: (m["hg"], m["ag"]) for rows in fd_matches.values() for m in rows
+              if m["status"] == "FINISHED" and m["hg"] is not None}
+for h in history.values():
+    if h.get("result"):
+        continue
+    res = fd_results.get(h.get("fd_id")) or tuple(state.get("cup_results", {}).get(h.get("odds_id") or "", []) or ()) or None
+    if res and None not in res:
+        h["result"] = list(res)
+history = {k: v for k, v in history.items() if (NOW - dt(v["date"])).days < 400}
+
+# ======================================================================== 7. auto-réglage
+# 7a. test glissant hebdo : xG, mémoire du modèle et poids de l'Elo choisis sur 12 semaines réelles
+bt = state.get("backtest")
+if league_table and (not bt or bt.get("v") != 2 or (NOW - dt(bt["at"])).days >= 6):
+    starts = [NOW - timedelta(days=7 * w) for w in range(12, 0, -1)]
+    elo_hist = {}
+    for st in starts:
+        r = S.clubelo_ratings(st, quiet=True)
+        elo_hist[st] = (r, Matcher(r.keys())) if r else None
+    xg_grid = C.TUNE_XG if xg_by_match else [C.XG_WEIGHT]
+    rows_by = defaultdict(list)
+    for xg_w in xg_grid:
+        for xi in C.TUNE_XI:
+            for code, table in league_table.items():
+                for st in starts:
+                    week = [m for m in table if st <= m["d"] < st + timedelta(days=7)]
+                    if not week:
+                        continue
+                    mdl = fit_league(code, cutoff=st, xg_w=xg_w, xi=xi)
+                    if not mdl:
+                        continue
+                    eh = elo_hist.get(st)
+                    for m in week:
+                        if not (mdl.known(m["home"]) and mdl.known(m["away"])):
+                            continue
+                        l, u_ = mdl.rates(m["home"], m["away"])
+                        eh_h = eh_a = None
+                        if eh:
+                            kh, ka = eh[1].find(m["home"], 0.8), eh[1].find(m["away"], 0.8)
+                            if kh and ka:
+                                eh_h, eh_a = eh[0][kh]["elo"], eh[0][ka]["elo"]
+                        er = elo_rates(eh_h, eh_a, l + u_, C.ELO_HOME_ADV) if eh_h is not None else None
+                        for ew in C.TUNE_ELO:
+                            if er and ew:
+                                lam = math.exp((1 - ew) * math.log(l) + ew * math.log(er[0]))
+                                mu = math.exp((1 - ew) * math.log(u_) + ew * math.log(er[1]))
+                            else:
+                                lam, mu = l, u_
+                            pr = markets_from_matrix(score_matrix(lam, mu, mdl.rho))
+                            rows_by[(xg_w, xi, ew)].append({"comp": code, "p": [pr["home"], pr["draw"], pr["away"]],
+                                                            "result": [m["hg"], m["ag"]]})
+    scores = {k: metrics(v) for k, v in rows_by.items()}
+    scores = {k: v for k, v in scores.items() if v}
+    if scores:
+        best_k = min(scores, key=lambda k: scores[k]["logloss"])
+        current = (tuned.get("xg_weight", C.XG_WEIGHT), tuned.get("xi", C.TIME_DECAY_XI),
+                   tuned.get("elo_weight", C.ELO_WEIGHT_DOMESTIC))
+        cur_ll = scores[current]["logloss"] if current in scores else 9.0
+        # on ne change de réglage que pour un gain net (évite de suivre le bruit d'une semaine à l'autre)
+        if scores[best_k]["n"] >= C.TUNE_MIN_MATCHES and scores[best_k]["logloss"] < cur_ll - 0.002:
+            tuned["xg_weight"], tuned["xi"], tuned["elo_weight"] = best_k
+            tuned["at"] = NOW.isoformat()
+    chosen = (tuned.get("xg_weight", C.XG_WEIGHT), tuned.get("xi", C.TIME_DECAY_XI),
+              tuned.get("elo_weight", C.ELO_WEIGHT_DOMESTIC))
+    rows_c = rows_by.get(chosen) or (rows_by[min(scores, key=lambda k: scores[k]["logloss"])] if scores else [])
+    base = None
+    if rows_c:   # référence naïve : toujours les fréquences moyennes 1/N/2
+        freq = np.bincount([0 if r["result"][0] > r["result"][1] else 1 if r["result"][0] == r["result"][1] else 2
+                            for r in rows_c], minlength=3) / len(rows_c)
+        base = metrics([{"p": list(freq), "result": r["result"]} for r in rows_c])
+    bt = {"v": 2, "at": NOW.isoformat(), "weeks": 12, "all": metrics(rows_c), "baseline": base,
+          "by_comp": {c: metrics([r for r in rows_c if r["comp"] == c]) for c in league_table},
+          "grid": sorted([{"xg": k[0], "xi": k[1], "elo": k[2], "logloss": v["logloss"],
+                           "accuracy": v["accuracy"], "n": v["n"]} for k, v in scores.items()],
+                         key=lambda g: g["logloss"])[:8]}
+    state["backtest"] = bt
+
+# 7b. poids du marché, appris sur nos propres pronos vérifiés
+with_mkt = [h for h in history.values() if h.get("result") and h.get("pk") and h.get("pm")]
+if len(with_mkt) >= C.TUNE_MIN_MATCHES:
+    def ll_for(w):
+        return metrics([{"p": [w * a + (1 - w) * b for a, b in zip(h["pk"], h["pm"])], "result": h["result"]}
+                        for h in with_mkt])["logloss"]
+    best_w = min(C.TUNE_MARKET, key=ll_for)
+    if ll_for(best_w) < ll_for(tuned.get("market_weight", C.MARKET_WEIGHT)) - 0.002:
+        tuned["market_weight"] = best_w
+
+XG_W = tuned.get("xg_weight", C.XG_WEIGHT)
+XI = tuned.get("xi", C.TIME_DECAY_XI)
+ELO_W = tuned.get("elo_weight", C.ELO_WEIGHT_DOMESTIC)
+MKT_W = tuned.get("market_weight", C.MARKET_WEIGHT)
+
+# ======================================================================== 8. modèles du jour
+models = {}
+for code in league_table:
+    mdl = fit_league(code)
+    if mdl:
+        models[code] = mdl
+    else:
+        S.log(f"Pas assez de matchs pour {code}")
 team_model = {}   # nom FD -> modèle de son championnat (pour les coupes)
 for code, mdl in models.items():
-    season_teams = {m["home"] for m in fd_matches[code] if m["date"][:4] >= str(season)}
-    for t in season_teams:
+    for t in {m["home"] for m in fd_matches[code] if m["date"][:4] >= str(season)}:
         team_model[t] = mdl
 
-# ======================================================================== 5. absences (API-Football)
-absences = defaultdict(list)    # nom FD -> [{player, type, reason, share}]
+# ======================================================================== 9. absences (API-Football)
+absences = defaultdict(list)    # nom FD -> [{player, reason, doubt, share}]
 if C.AF_KEY:
     soon = NOW + timedelta(days=3)
     stop = False
@@ -217,83 +440,7 @@ if C.AF_KEY:
                                            "doubt": w < 1, "share": round(share * w, 3)})
 
 
-# ======================================================================== 6. calendrier à venir
-horizon = NOW + timedelta(days=C.HORIZON_DAYS)
-upcoming = []
-for code, rows in fd_matches.items():
-    for m in rows:
-        if m["status"] in ("SCHEDULED", "TIMED") and NOW - timedelta(hours=2) <= dt(m["date"]) <= horizon:
-            upcoming.append({"comp": code, "date": m["date"], "home": m["home"], "away": m["away"],
-                             "home_name": m["home_short"], "away_name": m["away_short"],
-                             "home_crest": m["home_crest"], "away_crest": m["away_crest"],
-                             "stage": m.get("stage"), "fd_id": m["fd_id"]})
-for code, evs in cup_events.items():
-    for e in evs:
-        if NOW - timedelta(hours=2) <= dt(e["commence_time"]) <= horizon:
-            h = fd_team_match.find(e["home_team"], 0.82) or e["home_team"]
-            a = fd_team_match.find(e["away_team"], 0.82) or e["away_team"]
-            upcoming.append({"comp": code, "date": e["commence_time"], "home": h, "away": a,
-                             "home_name": shorts.get(h, e["home_team"]), "away_name": shorts.get(a, e["away_team"]),
-                             "home_crest": crests.get(h, ""), "away_crest": crests.get(a, ""),
-                             "stage": None, "odds_id": e["id"]})
-upcoming.sort(key=lambda x: x["date"])
-
-# ======================================================================== 7. cotes (une fois par ~20 h)
-odds_cache = state.get("odds_cache", {})
-last_odds = state.get("last_odds")
-if C.ODDS_KEY and (not last_odds or (NOW - dt(last_odds)).total_seconds() > C.ODDS_MIN_HOURS * 3600):
-    soon = NOW + timedelta(hours=C.ODDS_WINDOW_H)
-    fetched = False
-    for code, comp in C.COMPETITIONS.items():
-        if not any(u["comp"] == code and dt(u["date"]) <= soon for u in upcoming):
-            continue
-        evs = odds_api.odds(comp["odds"], C.ODDS_WINDOW_H)
-        fetched = True
-        cand = [u for u in upcoming if u["comp"] == code]
-        for e in evs:
-            ed = dt(e["commence_time"])
-            target = None
-            for u in cand:
-                if abs((dt(u["date"]) - ed).total_seconds()) < 36 * 3600 and \
-                        Matcher([u["home"], u["home_name"]]).find(e["home_team"], 0.75) and \
-                        Matcher([u["away"], u["away_name"]]).find(e["away_team"], 0.75):
-                    target = u
-                    break
-            if not target:
-                continue
-            books, totals = [], []
-            for b in e.get("bookmakers", []):
-                for mk in b.get("markets", []):
-                    oc = {o["name"]: o for o in mk.get("outcomes", [])}
-                    if mk["key"] == "h2h" and "Draw" in oc:
-                        ph = oc.get(e["home_team"], {}).get("price")
-                        pa = oc.get(e["away_team"], {}).get("price")
-                        books.append({"book": b["title"], "h": ph, "d": oc["Draw"]["price"], "a": pa})
-                    if mk["key"] == "totals":
-                        ov = [o for o in mk["outcomes"] if o.get("point") == 2.5]
-                        if len(ov) == 2:
-                            o = {x["name"]: x["price"] for x in ov}
-                            totals.append({"book": b["title"], "over": o.get("Over"), "under": o.get("Under")})
-            if books:
-                odds_cache[mkey(target["comp"], target["date"], target["home"], target["away"])] = {
-                    "at": NOW.isoformat(), "h2h": books, "totals": totals}
-    if fetched:
-        state["last_odds"] = NOW.isoformat()
-        # résultats des coupes hors football-data (coûte 2 crédits par compétition)
-        for code, comp in C.COMPETITIONS.items():
-            if comp["fd"] is None and any(h["comp"] == code and not h.get("result")
-                                          for h in history.values()):
-                for sc in odds_api.scores(comp["odds"], 3):
-                    if sc.get("completed") and sc.get("scores"):
-                        sm = {s["name"]: int(s["score"]) for s in sc["scores"]}
-                        state.setdefault("cup_results", {})[sc["id"]] = [
-                            sm.get(sc["home_team"]), sm.get(sc["away_team"])]
-state["odds_cache"] = {k: v for k, v in odds_cache.items()
-                       if (NOW - dt(v["at"])).days < 6}
-state["odds_remaining"] = odds_api.remaining if odds_api.remaining is not None else state.get("odds_remaining")
-
-
-# ======================================================================== 8. pronostics
+# ======================================================================== 10. pronostics
 def form_of(team, n=5):
     g = team_games.get(team, [])[-n:]
     return [{"r": "V" if x["gf"] > x["ga"] else "N" if x["gf"] == x["ga"] else "D",
@@ -365,8 +512,8 @@ for u in upcoming:
     comp = C.COMPETITIONS[code]
     when = dt(u["date"])
     neutral = (u.get("stage") or "") == "FINAL"
-    elo_h, elo_key_h = elo_of(u["home"])
-    elo_a, elo_key_a = elo_of(u["away"])
+    elo_h, _ = elo_of(u["home"])
+    elo_a, _ = elo_of(u["away"])
     quality = []
 
     if comp["domestic"] and code in models and models[code].known(u["home"]) and models[code].known(u["away"]):
@@ -374,9 +521,7 @@ for u in upcoming:
         lam, mu = mdl.rates(u["home"], u["away"], neutral)
         rho = mdl.rho
         if elo_h and elo_a:
-            el, em = elo_rates(elo_h, elo_a, lam + mu, C.ELO_HOME_ADV, neutral)
-            w = C.ELO_WEIGHT_DOMESTIC
-            lam, mu = math.exp((1 - w) * math.log(lam) + w * math.log(el)), math.exp((1 - w) * math.log(mu) + w * math.log(em))
+            lam, mu = blend_elo(lam, mu, elo_h, elo_a, ELO_W, neutral)
         else:
             quality.append("Elo manquant")
     else:
@@ -403,13 +548,12 @@ for u in upcoming:
     lam *= 1 - min(0.18, 0.7 * sum(a["share"] for a in abs_h))
     mu *= 1 - min(0.18, 0.7 * sum(a["share"] for a in abs_a))
 
-    mat = score_matrix(lam, mu, rho)
-    model_p = markets_from_matrix(mat)
+    model_p = markets_from_matrix(score_matrix(lam, mu, rho))
 
     # marché
     key = mkey(code, u["date"], u["home"], u["away"])
     oc = odds_cache.get(key)
-    market, best, books_out = None, None, []
+    market, best, books_out, totals_out = None, None, [], []
     if oc:
         probs, margins = [], []
         for b in oc["h2h"]:
@@ -424,31 +568,30 @@ for u in upcoming:
                       "margin": round(float(np.mean(margins)) * 100, 1), "at": oc["at"]}
             best = {}
             for side in ("h", "d", "a"):
-                b = max((x for x in oc["h2h"] if x.get(side)), key=lambda x: x[side])
+                b = max((x for x in books_out if x.get(side)), key=lambda x: x[side])
                 best[side] = {"odd": b[side], "book": b["book"]}
-            ov = [devig([t["over"], t["under"]]) for t in oc.get("totals", []) if t.get("over") and t.get("under")]
+            totals_out = [t for t in oc.get("totals", []) if t.get("over") and t.get("under")]
+            ov = [devig([t["over"], t["under"]]) for t in totals_out]
             ov = [x[0][0] for x in ov if x]
             if ov:
                 market["over_2.5"] = float(np.mean(ov))
 
     final = dict(model_p)
     if market:
-        mw = C.MARKET_WEIGHT
         for k in ("home", "draw", "away"):
-            final[k] = mw * market[k] + (1 - mw) * model_p[k]
+            final[k] = MKT_W * market[k] + (1 - MKT_W) * model_p[k]
         if "over_2.5" in market:
-            final["over_2.5"] = mw * market["over_2.5"] + (1 - mw) * model_p["over_2.5"]
+            final["over_2.5"] = MKT_W * market["over_2.5"] + (1 - MKT_W) * model_p["over_2.5"]
     else:
         quality.append("Pas de cotes : modèle seul")
 
     top = max(("home", "draw", "away"), key=lambda k: final[k])
-    conf_score = final[top] - (0.05 * len([q for q in quality if "incertain" in q or "hors" in q]))
+    conf_score = final[top] - 0.05 * len([q for q in quality if "incertain" in q or "hors" in q])
     confidence = 3 if conf_score >= 0.58 else 2 if conf_score >= 0.45 else 1
 
     ctx = {"elo_h": elo_h, "elo_a": elo_a, "form_home": form_of(u["home"]), "form_away": form_of(u["away"]),
            "xg_home": recent_xg(u["home"]), "xg_away": recent_xg(u["away"]),
            "rest_home": rh, "rest_away": ra, "abs_home": abs_h, "abs_away": abs_a, "market": market}
-    p_pack = {"model": model_p, "lam": lam, "mu": mu}
 
     value = None
     if best:
@@ -457,7 +600,7 @@ for u in upcoming:
         if evs[s] > 0.03:
             value = {"side": s, "ev": round(evs[s] * 100, 1), "odd": best[s]["odd"], "book": best[s]["book"]}
 
-    card = {
+    cards.append({
         "key": key, "comp": code, "date": u["date"],
         "home": {"name": u["home_name"], "crest": u["home_crest"], "elo": elo_h and round(elo_h),
                  "form": ctx["form_home"], "xg": ctx["xg_home"], "rest": rh, "absences": abs_h},
@@ -467,11 +610,10 @@ for u in upcoming:
         "model": {k: r3(v) for k, v in model_p.items() if k != "top_scores"},
         "market": market and {k: (r3(v) if isinstance(v, float) else v) for k, v in market.items()},
         "final": {k: r3(v) for k, v in final.items() if k != "top_scores"},
-        "scores": model_p["top_scores"], "best_odds": best, "books": books_out, "value": value,
-        "pick": top, "confidence": confidence, "quality": quality,
-        "why": explain(u, p_pack, ctx),
-    }
-    cards.append(card)
+        "scores": model_p["top_scores"], "best_odds": best, "books": books_out, "totals_books": totals_out,
+        "value": value, "pick": top, "confidence": confidence, "quality": quality,
+        "why": explain(u, {"model": model_p, "lam": lam, "mu": mu}, ctx),
+    })
 
     # snapshot pour le suivi (on écrase jusqu'au coup d'envoi)
     if when > NOW:
@@ -483,40 +625,23 @@ for u in upcoming:
                         "o25": r3(final["over_2.5"]), "btts": r3(final["btts"]),
                         "result": history.get(key, {}).get("result")}
 
-# ======================================================================== 9. résultats & fiabilité
-fd_results = {m["fd_id"]: (m["hg"], m["ag"]) for rows in fd_matches.values() for m in rows
-              if m["status"] == "FINISHED" and m["hg"] is not None}
-for h in history.values():
-    if h.get("result"):
-        continue
-    res = fd_results.get(h.get("fd_id")) or tuple(state.get("cup_results", {}).get(h.get("odds_id") or "", []) or ()) or None
-    if res and None not in res:
-        h["result"] = list(res)
-history = {k: v for k, v in history.items() if (NOW - dt(v["date"])).days < 400}
+# ======================================================================== 11. tickets
+tk = T.build_all(cards, NOW)
+track_book = tk["books"][0] if tk["books"] else None
+results = {k: v["result"] for k, v in history.items() if v.get("result")}
+tk_hist = load("tickets_history.json", [])
+pending, tk_hist = T.track(state.get("tickets_pending", {}), tk_hist,
+                           tk["by_book"].get(track_book, {}) if track_book else {}, NOW, results)
+for t in pending.values():
+    t["book"] = track_book
+state["tickets_pending"] = pending
+for t in tk_hist:
+    t.setdefault("book", track_book)
+tk["track_book"] = track_book
+tk["generated"] = NOW.isoformat()
+tk["tracking"] = T.stats(tk_hist)
 
-
-def metrics(rows, key="p"):
-    rows = [r for r in rows if r.get(key) and r.get("result")]
-    if not rows:
-        return None
-    acc = ll = br = 0.0
-    bins = [[0, 0.0, 0] for _ in range(10)]
-    for r in rows:
-        hg, ag = r["result"]
-        o = 0 if hg > ag else 1 if hg == ag else 2
-        p = [max(min(x, 0.999), 0.001) for x in r[key]]
-        acc += int(np.argmax(p) == o)
-        ll -= math.log(p[o])
-        br += sum((p[i] - (i == o)) ** 2 for i in range(3))
-        for i in range(3):
-            b = min(int(p[i] * 10), 9)
-            bins[b][0] += 1; bins[b][1] += p[i]; bins[b][2] += int(i == o)
-    n = len(rows)
-    return {"n": n, "accuracy": round(acc / n, 3), "logloss": round(ll / n, 3), "brier": round(br / n, 3),
-            "calibration": [{"pred": round(b[1] / b[0], 3), "real": round(b[2] / b[0], 3), "n": b[0]}
-                            for b in bins if b[0] >= 5]}
-
-
+# ======================================================================== 12. fiabilité
 settled = [h for h in history.values() if h.get("result")]
 live = {"all": metrics(settled), "model_only": metrics(settled, "pm"),
         "market_only": metrics([h for h in settled if h.get("pk")], "pk"),
@@ -524,61 +649,28 @@ live = {"all": metrics(settled), "model_only": metrics(settled, "pm"),
         "recent": sorted([{"date": h["date"], "comp": h["comp"], "home": h["home"], "away": h["away"],
                            "p": h["p"], "result": h["result"]} for h in settled],
                          key=lambda x: x["date"], reverse=True)[:40]}
-for h in settled:
-    hg, ag = h["result"]
-    if h.get("o25") is not None:
-        h["_o25ok"] = int((hg + ag > 2.5) == (h["o25"] >= 0.5))
-live["over25_hit"] = (round(np.mean([h["_o25ok"] for h in settled if "_o25ok" in h]), 3)
-                      if any("_o25ok" in h for h in settled) else None)
-for h in history.values():
-    h.pop("_o25ok", None)
+o25 = [int((h["result"][0] + h["result"][1] > 2.5) == (h["o25"] >= 0.5)) for h in settled if h.get("o25") is not None]
+live["over25_hit"] = round(float(np.mean(o25)), 3) if o25 else None
 
-# backtest glissant (sur les vrais matchs passés, refait chaque semaine)
-bt = state.get("backtest")
-if not bt or (NOW - dt(bt["at"])).days >= 6:
-    rows_bt = []
-    for code, rows in fd_matches.items():
-        if not C.COMPETITIONS[code]["domestic"]:
-            continue
-        done = [m for m in rows if m["status"] == "FINISHED" and m["hg"] is not None]
-        for w in range(12, 0, -1):
-            start, end = NOW - timedelta(days=7 * w), NOW - timedelta(days=7 * (w - 1))
-            week = [m for m in done if start <= dt(m["date"]) < end]
-            if not week:
-                continue
-            mdl = fit_league(rows, code, cutoff=start)
-            if not mdl:
-                continue
-            for m in week:
-                if not (mdl.known(m["home"]) and mdl.known(m["away"])):
-                    continue
-                l, u_ = mdl.rates(m["home"], m["away"])
-                pr = markets_from_matrix(score_matrix(l, u_, mdl.rho))
-                rows_bt.append({"comp": code, "p": [pr["home"], pr["draw"], pr["away"]],
-                                "result": [m["hg"], m["ag"]]})
-    res_all = metrics(rows_bt)
-    base = None
-    if rows_bt:  # référence naïve : fréquences moyennes 1/N/2
-        freq = np.bincount([0 if r["result"][0] > r["result"][1] else 1 if r["result"][0] == r["result"][1] else 2
-                            for r in rows_bt], minlength=3) / len(rows_bt)
-        base = metrics([{"p": list(freq), "result": r["result"]} for r in rows_bt])
-    bt = {"at": NOW.isoformat(), "weeks": 12, "all": res_all, "baseline": base,
-          "by_comp": {c: metrics([r for r in rows_bt if r["comp"] == c]) for c in C.COMPETITIONS
-                      if C.COMPETITIONS[c]["domestic"]}}
-    state["backtest"] = bt
+weights = {"market": MKT_W, "xg": XG_W, "xi": XI, "elo": ELO_W, "tuned_at": tuned.get("at"),
+           "market_tuned": "market_weight" in tuned}
 
-# ======================================================================== 10. écriture
-save("matches.json", {"generated": NOW.isoformat(), "matches": cards,
+# ======================================================================== 13. écriture
+save("matches.json", {"generated": NOW.isoformat(), "matches": cards, "weights": weights,
                       "competitions": {k: {"name": v["name"], "flag": v["flag"]} for k, v in C.COMPETITIONS.items()}})
-save("performance.json", {"generated": NOW.isoformat(), "live": live, "backtest": bt})
+save("tickets.json", tk)
+save("performance.json", {"generated": NOW.isoformat(), "live": live, "backtest": bt, "weights": weights})
 save("meta.json", {"generated": NOW.isoformat(), "warnings": S.LOG[-30:],
-                   "sources": {"football_data": bool(C.FD_KEY), "understat": bool(xg_by_match),
-                               "clubelo": bool(elo), "odds": bool(C.ODDS_KEY),
+                   "sources": {"football_data": bool(C.FD_KEY) and any(fd_matches.values()),
+                               "understat": bool(xg_by_match), "clubelo": bool(elo), "odds": bool(odds_cache),
                                "absences": any(absences.values()),
-                               "odds_last": state.get("last_odds"), "odds_credits_left": state.get("odds_remaining")},
+                               "odds_last": max(last_by.values()) if last_by else None,
+                               "odds_credits_left": state.get("odds_remaining")},
                    "model": {"leagues_fitted": list(models), "xg_matches": len(xg_by_match),
                              "rho": {k: round(m.rho, 3) for k, m in models.items()},
                              "home_adv": {k: round(math.exp(m.home_adv), 3) for k, m in models.items()}}})
 save("history.json", history)
+save("tickets_history.json", tk_hist)
 save("state.json", state)
-print(f"OK : {len(cards)} matchs, {len(settled)} pronos vérifiés, {len(S.LOG)} avertissements")
+print(f"OK : {len(cards)} matchs, {len(settled)} pronos vérifiés, {len(tk_hist)} tickets suivis, "
+      f"{len(S.LOG)} avertissements")

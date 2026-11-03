@@ -73,7 +73,7 @@ def norm(name: str) -> str:
     s = _plain(name)
     if s in ALIASES:
         return ALIASES[s]
-    core = " ".join(t for t in s.split() if t not in STOP) or s
+    core = " ".join(t for t in s.split() if t not in STOP and not t.isdigit()) or s
     return ALIASES.get(core, core)
 
 

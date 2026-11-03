@@ -63,7 +63,11 @@ class FootballData:
             return []
         out = []
         for m in r.json().get("matches", []):
-            ft = (m.get("score") or {}).get("fullTime") or {}
+            sc = m.get("score") or {}
+            ft = sc.get("fullTime") or {}
+            # les paris se règlent sur 90 min : on ignore prolongation et tirs au but
+            if sc.get("duration") in ("EXTRA_TIME", "PENALTY_SHOOTOUT") and sc.get("regularTime"):
+                ft = sc["regularTime"]
             out.append({
                 "fd_id": m["id"], "date": m["utcDate"], "status": m["status"],
                 "stage": m.get("stage"), "matchday": m.get("matchday"),
@@ -77,11 +81,12 @@ class FootballData:
 
 
 # ---------------------------------------------------------------- ClubElo
-def clubelo_ratings(day=None):
+def clubelo_ratings(day=None, quiet=False):
     day = (day or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
     r = _get(f"http://api.clubelo.com/{day}")
     if r is None or r.status_code != 200 or "Club" not in r.text[:200]:
-        log("ClubElo indisponible : Elo neutre utilisé")
+        if not quiet:
+            log("ClubElo indisponible : Elo neutre utilisé")
         return {}
     ratings = {}
     for row in csv.DictReader(io.StringIO(r.text)):
@@ -150,9 +155,9 @@ class Odds:
     def events(self, sport):  # gratuit, ne consomme pas de crédit
         return self._call(f"{sport}/events") or []
 
-    def odds(self, sport, hours):
+    def odds(self, sport, hours, markets="h2h,totals"):
+        """Coût = nb de marchés x nb de régions, quel que soit le nombre de matchs renvoyés."""
         to = (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        markets = "h2h,totals" if (self.remaining is None or self.remaining > 60) else "h2h"
         return self._call(f"{sport}/odds", regions="fr", markets=markets, oddsFormat="decimal",
                           commenceTimeTo=to) or []
 

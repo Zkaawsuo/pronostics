@@ -39,6 +39,15 @@
   <div id="match-list"></div>
 </main>
 
+<main id="view-tickets" class="view">
+  <h2 class="title">Tickets du moment</h2>
+  <p class="lead">Trois tickets construits automatiquement sur les prochains matchs, avec les vraies cotes du bookmaker choisi.</p>
+  <div class="chips" id="book-chips"></div>
+  <div class="stake-row"><span class="src">Mise</span><div class="input small"><input id="stake-in" inputmode="decimal" value="5"><span class="src">€</span></div></div>
+  <div id="tickets"></div>
+  <div id="tickets-track"></div>
+</main>
+
 <main id="view-combo" class="view">
   <h2 class="title">Mon combiné</h2>
   <p class="lead">Ajoute des sélections depuis une fiche match. L'app calcule la vraie chance que tout passe.</p>
@@ -53,12 +62,14 @@
 
 <nav class="tabs">
   <button data-view="matches" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z"/></svg>Matchs</button>
+  <button data-view="tickets"><svg viewBox="0 0 24 24"><path d="M3 8a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a2 2 0 0 0 0 4v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/></svg>Tickets</button>
   <button data-view="combo"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>Combiné<span class="badge" id="combo-badge"></span></button>
   <button data-view="perf"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Fiabilité</button>
 </nav>
 
 <div class="sheet-bg" id="sheet-bg"></div>
 <section class="sheet" id="sheet" aria-modal="true" role="dialog"></section>
+<div class="toast" id="toast"></div>
 
 <script src="app.js"></script>
 </body>
