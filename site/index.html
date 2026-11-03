@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1410">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pronos">
+<title>Pronos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="dot"></span>Pronos</div>
+  <div class="updated" id="updated">Chargement…</div>
+</header>
+
+<main id="view-matches" class="view active">
+  <div class="chips" id="comp-chips"></div>
+  <div class="row-filters">
+    <div class="seg" id="day-seg">
+      <button data-v="all" class="on">Tout</button>
+      <button data-v="today">Aujourd'hui</button>
+      <button data-v="tomorrow">Demain</button>
+    </div>
+    <div class="seg" id="conf-seg">
+      <button data-v="0" class="on">Tous</button>
+      <button data-v="2">Moyen+</button>
+      <button data-v="3">Fort</button>
+    </div>
+  </div>
+  <div id="match-list"></div>
+</main>
+
+<main id="view-combo" class="view">
+  <h2 class="title">Mon combiné</h2>
+  <p class="lead">Ajoute des sélections depuis une fiche match. L'app calcule la vraie chance que tout passe.</p>
+  <div id="combo"></div>
+</main>
+
+<main id="view-perf" class="view">
+  <h2 class="title">Fiabilité</h2>
+  <p class="lead">Ce que vaut vraiment le modèle, mesuré sur des matchs déjà joués.</p>
+  <div id="perf"></div>
+</main>
+
+<nav class="tabs">
+  <button data-view="matches" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z"/></svg>Matchs</button>
+  <button data-view="combo"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>Combiné<span class="badge" id="combo-badge"></span></button>
+  <button data-view="perf"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Fiabilité</button>
+</nav>
+
+<div class="sheet-bg" id="sheet-bg"></div>
+<section class="sheet" id="sheet" aria-modal="true" role="dialog"></section>
+
+<script src="app.js"></script>
+</body>
+</html>

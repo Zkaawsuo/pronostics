@@ -1,0 +1,108 @@
+"""Rapprochement des noms d'équipes entre sources (football-data, Understat, ClubElo, cotes...)."""
+import re
+import unicodedata
+from difflib import SequenceMatcher
+
+STOP = {"fc", "cf", "afc", "ac", "as", "sc", "ssc", "us", "ss", "club", "calcio", "bc", "rc", "ogc",
+        "vfl", "vfb", "tsg", "sv", "fsv", "1", "cd", "ud", "sd", "rcd", "ca", "de", "del", "la", "le",
+        "the", "and", "1899", "1846", "1907", "1909", "1910", "1913", "04", "05", "96", "hsc", "losc", "fk"}
+
+# formes longues -> forme courte commune
+ALIASES = {
+    "manchester united": "man united", "manchester utd": "man united", "man utd": "man united",
+    "manchester city": "man city",
+    "tottenham hotspur": "tottenham", "spurs": "tottenham",
+    "wolverhampton wanderers": "wolves", "wolverhampton": "wolves",
+    "nottingham forest": "forest", "nottm forest": "forest", "nott m forest": "forest",
+    "newcastle united": "newcastle", "west ham united": "west ham", "brighton hove albion": "brighton",
+    "leeds united": "leeds", "sheffield united": "sheffield utd", "leicester city": "leicester",
+    "ipswich town": "ipswich", "luton town": "luton", "afc bournemouth": "bournemouth",
+    "paris saint germain": "paris sg", "paris": "paris sg", "psg": "paris sg",
+    "olympique marseille": "marseille", "olympique de marseille": "marseille",
+    "olympique lyonnais": "lyon", "olympique lyon": "lyon",
+    "stade rennais": "rennes", "stade de reims": "reims", "stade brestois 29": "brest", "brestois": "brest",
+    "lille osc": "lille", "osc lille": "lille", "rc lens": "lens", "racing club de lens": "lens",
+    "as monaco": "monaco", "ogc nice": "nice", "rc strasbourg alsace": "strasbourg",
+    "racing strasbourg": "strasbourg", "toulouse fc": "toulouse", "fc nantes": "nantes",
+    "montpellier hsc": "montpellier", "aj auxerre": "auxerre", "angers sco": "angers",
+    "le havre ac": "le havre", "havre": "le havre", "fc lorient": "lorient", "paris fc": "paris fc",
+    "fc metz": "metz", "saint etienne": "st etienne", "as saint etienne": "st etienne",
+    "fc bayern munchen": "bayern", "bayern munchen": "bayern", "bayern munich": "bayern",
+    "borussia dortmund": "dortmund", "bayer 04 leverkusen": "leverkusen", "bayer leverkusen": "leverkusen",
+    "borussia monchengladbach": "gladbach", "monchengladbach": "gladbach", "m gladbach": "gladbach",
+    "rb leipzig": "leipzig", "rasenballsport leipzig": "leipzig",
+    "eintracht frankfurt": "frankfurt", "vfb stuttgart": "stuttgart", "sc freiburg": "freiburg",
+    "tsg hoffenheim": "hoffenheim", "tsg 1899 hoffenheim": "hoffenheim", "1 fsv mainz 05": "mainz",
+    "fsv mainz": "mainz", "mainz 05": "mainz", "vfl wolfsburg": "wolfsburg", "werder bremen": "werder",
+    "sv werder bremen": "werder", "fc augsburg": "augsburg", "1 fc union berlin": "union berlin",
+    "union berlin": "union berlin", "1 fc heidenheim 1846": "heidenheim", "fc st pauli": "st pauli",
+    "fc st pauli 1910": "st pauli", "1 fc koln": "koln", "fc koln": "koln", "cologne": "koln",
+    "hamburger sv": "hamburg", "vfl bochum": "bochum", "holstein kiel": "kiel",
+    "fc internazionale milano": "inter", "internazionale": "inter", "inter milan": "inter",
+    "ac milan": "milan", "juventus fc": "juventus", "ssc napoli": "napoli", "as roma": "roma",
+    "ss lazio": "lazio", "atalanta bc": "atalanta", "acf fiorentina": "fiorentina",
+    "bologna fc 1909": "bologna", "torino fc": "torino", "udinese calcio": "udinese",
+    "genoa cfc": "genoa", "hellas verona": "verona", "parma calcio 1913": "parma",
+    "us lecce": "lecce", "cagliari calcio": "cagliari", "como 1907": "como", "us sassuolo": "sassuolo",
+    "atletico madrid": "atletico", "club atletico de madrid": "atletico", "atletico de madrid": "atletico",
+    "real madrid cf": "real madrid", "fc barcelona": "barcelona", "athletic club": "bilbao",
+    "athletic bilbao": "bilbao", "real sociedad de futbol": "sociedad", "real sociedad": "sociedad",
+    "real betis balompie": "betis", "real betis": "betis", "sevilla fc": "sevilla",
+    "villarreal cf": "villarreal", "valencia cf": "valencia", "rc celta de vigo": "celta",
+    "celta vigo": "celta", "ca osasuna": "osasuna", "rayo vallecano de madrid": "rayo",
+    "rayo vallecano": "rayo", "getafe cf": "getafe", "girona fc": "girona", "rcd mallorca": "mallorca",
+    "deportivo alaves": "alaves", "rcd espanyol de barcelona": "espanyol", "espanyol": "espanyol",
+    "ud las palmas": "las palmas", "cd leganes": "leganes", "real valladolid cf": "valladolid",
+    "elche cf": "elche", "levante ud": "levante", "real oviedo": "oviedo",
+    "sporting cp": "sporting", "sporting lisbon": "sporting", "sl benfica": "benfica",
+    "fc porto": "porto", "psv eindhoven": "psv", "afc ajax": "ajax", "feyenoord rotterdam": "feyenoord",
+    "club brugge kv": "brugge", "club brugge": "brugge", "celtic fc": "celtic", "rangers fc": "rangers",
+    "galatasaray sk": "galatasaray", "fenerbahce sk": "fenerbahce", "red bull salzburg": "salzburg",
+    "fc salzburg": "salzburg", "shakhtar donetsk": "shakhtar", "dinamo zagreb": "zagreb",
+    "gnk dinamo zagreb": "zagreb", "crvena zvezda": "crvena zvezda", "red star belgrade": "crvena zvezda",
+}
+
+
+def _plain(name: str) -> str:
+    s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def norm(name: str) -> str:
+    s = _plain(name)
+    if s in ALIASES:
+        return ALIASES[s]
+    core = " ".join(t for t in s.split() if t not in STOP) or s
+    return ALIASES.get(core, core)
+
+
+def _score(a: str, b: str) -> float:
+    if a == b:
+        return 1.0
+    ta, tb = set(a.split()), set(b.split())
+    if ta and tb and (ta <= tb or tb <= ta):
+        return 0.92
+    return SequenceMatcher(None, a, b).ratio()
+
+
+class Matcher:
+    """Associe un nom quelconque à une liste de noms cibles (une source)."""
+
+    def __init__(self, targets):
+        self.targets = list(dict.fromkeys(targets))
+        self.normed = {t: norm(t) for t in self.targets}
+        self.cache = {}
+
+    def find(self, name, threshold=0.80):
+        if name in self.cache:
+            return self.cache[name]
+        n = norm(name)
+        best, best_s = None, 0.0
+        for t, tn in self.normed.items():
+            s = _score(n, tn)
+            if s > best_s:
+                best, best_s = t, s
+        res = best if best_s >= threshold else None
+        self.cache[name] = res
+        return res
