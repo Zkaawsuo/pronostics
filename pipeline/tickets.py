@@ -16,11 +16,11 @@ from datetime import timedelta
 import config as C
 
 FORMULAS = {
-    "solide": {"name": "Solide", "emoji": "🟢", "band": (1.45, 1.85), "kmin": 1, "kmax": 3, "pmin": 0.68,
+    "solide": {"name": "Solide", "emoji": "🟢", "band": (1.45, 1.85), "kmin": 1, "kmax": 3, "pmin": 0.52, "pt": 0.50,
                "pitch": "Le plus probable : petite cote, mais c'est celui qui passe le plus souvent."},
-    "equilibre": {"name": "Équilibré", "emoji": "🟡", "band": (2.30, 3.40), "kmin": 2, "kmax": 4, "pmin": 0.50,
+    "equilibre": {"name": "Équilibré", "emoji": "🟡", "band": (2.30, 3.40), "kmin": 2, "kmax": 4, "pmin": 0.50, "pt": 0.25,
                   "pitch": "Un vrai gain possible en gardant de bonnes chances."},
-    "audacieux": {"name": "Audacieux", "emoji": "🔴", "band": (4.80, 8.50), "kmin": 2, "kmax": 5, "pmin": 0.36,
+    "audacieux": {"name": "Audacieux", "emoji": "🔴", "band": (4.80, 8.50), "kmin": 2, "kmax": 5, "pmin": 0.36, "pt": 0.10,
                   "pitch": "Meilleur rendement, avec uniquement des sélections crédibles."},
 }
 
@@ -88,26 +88,30 @@ def search(cands, fm, per_bucket=6, width=0.04):
     """Recherche par paliers de cote : garde les meilleures combinaisons pour chaque niveau de cote."""
     lo, hi = fm["band"]
     L, H = math.log(lo), math.log(hi)
-    pool = [c for c in cands if c["p"] >= fm["pmin"] and c["odd"] <= hi]
+    pool = [c for c in cands if c["p"] >= fm["pmin"] and c["odd"] <= hi and c["p"] * c["odd"] >= C.TICKET_MIN_LEG_RETURN]
     pool.sort(key=lambda c: c["p"] * c["odd"], reverse=True)
     pool = pool[:150]
     lr = [math.log(c["p"] * c["odd"]) for c in pool]
     lo_ = [math.log(c["odd"]) for c in pool]
+    lp = [math.log(c["p"]) for c in pool]
+    P_MIN, EV_MIN = math.log(fm["pt"]), math.log(1 + C.TICKET_MIN_EV)
     best = None
-    frontier = [((), 0.0, 0.0, frozenset())]
+    frontier = [((), 0.0, 0.0, frozenset(), 0.0)]
     for depth in range(1, fm["kmax"] + 1):
         buckets = {}
-        for legs, s_lr, s_lo, used in frontier:
+        for legs, s_lr, s_lo, used, s_lp in frontier:
             start = legs[-1] + 1 if legs else 0
             for j in range(start, len(pool)):
                 if pool[j]["key"] in used:
                     continue
                 n_lo = s_lo + lo_[j]
-                if n_lo > H + 1e-9:
+                n_lp = s_lp + lp[j]
+                if n_lo > H + 1e-9 or n_lp < P_MIN:   # trop de cote, ou plus assez de chances : inutile d'aller plus loin
                     continue
                 n_lr = s_lr + lr[j]
-                st = (legs + (j,), n_lr, n_lo, used | {pool[j]["key"]})
-                if depth >= fm["kmin"] and n_lo >= L - 1e-9 and (best is None or n_lr > best[1]):
+                st = (legs + (j,), n_lr, n_lo, used | {pool[j]["key"]}, n_lp)
+                if (depth >= fm["kmin"] and n_lo >= L - 1e-9 and n_lr >= EV_MIN
+                        and (best is None or n_lr > best[1])):
                     best = st
                 b = buckets.setdefault(int(n_lo / width), [])
                 b.append(st)

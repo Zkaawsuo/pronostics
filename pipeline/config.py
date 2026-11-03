@@ -46,4 +46,6 @@ ODDS_STOP_CREDITS = 10      # sous ce seuil : plus aucun relevé
 TICKET_WINDOW_H = 48        # matchs des 48 prochaines heures (96 h si pas assez)
 TICKET_MIN_LEAD_MIN = 25    # pas de match qui commence dans moins de 25 min
 TICKET_MAX_GAP = 0.12       # on écarte une sélection si modèle et marché divergent de plus de 12 pts
+TICKET_MIN_LEG_RETURN = 0.85  # sélection refusée si le bookmaker y prend plus de ~15 % (proba x cote < 0,85)
+TICKET_MIN_EV = -0.25       # ticket refusé s'il perd plus de 25 % en moyenne : la marge mange tout
 TRACK_BOOK = "Betclic"      # bookmaker dont on suit les tickets (repli : le mieux couvert)
