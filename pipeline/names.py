@@ -55,7 +55,7 @@ ALIASES = {
     "ud las palmas": "las palmas", "cd leganes": "leganes", "real valladolid cf": "valladolid",
     "elche cf": "elche", "levante ud": "levante", "real oviedo": "oviedo",
     "ath madrid": "atletico", "ath bilbao": "bilbao", "espanol": "espanyol", "vallecano": "rayo",
-    "ein frankfurt": "frankfurt", "la coruna": "deportivo", "sp gijon": "sporting gijon",
+    "ein frankfurt": "frankfurt", "la coruna": "coruna", "deportivo coruna": "coruna", "rc deportivo": "coruna", "sp gijon": "sporting gijon",
     "sporting cp": "sporting", "sporting clube de portugal": "sporting", "sporting clube portugal": "sporting",
     "sporting braga": "braga", "sc braga": "braga", "glasgow rangers": "rangers", "celtic glasgow": "celtic", "sporting lisbon": "sporting", "sl benfica": "benfica",
     "fc porto": "porto", "psv eindhoven": "psv", "afc ajax": "ajax", "feyenoord rotterdam": "feyenoord",
