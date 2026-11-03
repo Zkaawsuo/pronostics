@@ -40,6 +40,18 @@ Dans chaque fourchette, l'app choisit la combinaison qui rapporte le plus en moy
 une sélection par match, en écartant les sélections où modèle et marché divergent trop.
 Chaque ticket est figé au coup d'envoi de son 1er match puis réglé : le bilan réel est affiché.
 
+Tickets spéciaux par compétition (LDC, Ligue 1...) : mêmes règles, sur les matchs de la compétition,
+jusqu'à la semaine si rien n'est jouable dans les 4 jours.
+
+## Combis du match (type MyCombi)
+
+Pour chaque match, la matrice de scores donne la vraie chance de deux paris liés
+(victoire + plus de 2,5 buts, victoire sans encaisser, les 2 marquent + plus de 2,5...).
+Betclic ne publie pas ces cotes dans nos sources : l'app affiche la cote juste,
+la combi n'est intéressante que si MyCombi paie plus.
+
+Pas de buteurs : il faudrait des stats de joueurs de la saison en cours (offres payantes).
+
 ## Cotes : économie de crédits
 
 Un relevé couvre toute la semaine pour le même coût. Les compétitions avec un match dans les 30 h
