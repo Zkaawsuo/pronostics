@@ -176,7 +176,7 @@ function openSheet(key) {
 
     <h3>Forme (5 derniers)</h3>
     <div class="twocol"><div><div class="lbl">${esc(m.home.name)}</div>${form(m.home)}</div><div><div class="lbl">${esc(m.away.name)}</div>${form(m.away)}</div></div>
-    <h3>xG sur les 6 derniers</h3>
+    <h3>${S.data.xg_source === "tirs" ? "xG approchés (tirs)" : "xG"} sur les 6 derniers</h3>
     <div class="twocol src"><div>${xg(m.home)}</div><div>${xg(m.away)}</div></div>
     <h3>Repos & absences</h3>
     <div class="twocol src">
@@ -385,8 +385,8 @@ function renderPerf() {
     <h3 class="day">Sources de données</h3>
     <ul class="src">
       <li>${ok(src.football_data)} Résultats & calendrier (football-data.org)</li>
-      <li>${ok(src.understat)} xG (Understat)</li>
-      <li>${ok(src.clubelo)} Elo (ClubElo)</li>
+      <li>${ok(src.understat || src.shots_xg)} xG ${src.understat ? "(Understat)" : src.shots_xg ? "approchés par les tirs (football-data.co.uk) : Understat bloque les robots" : "indisponibles"}</li>
+      <li>${ok(src.clubelo || src.elo_local)} Elo ${src.clubelo ? "(ClubElo)" : src.elo_local ? "calculé par l'app sur les résultats : ClubElo injoignable" : "indisponible"}</li>
       <li>${ok(src.odds)} Cotes FR (The Odds API)${src.odds_credits_left != null ? ` · ${src.odds_credits_left} crédits restants ce mois` : ""}</li>
       <li>${ok(src.absences)} Absences (API-Football)</li>
     </ul>

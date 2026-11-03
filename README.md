@@ -6,9 +6,12 @@ GitHub Actions recalcule les pronos 4 fois par jour, GitHub Pages sert l'appli.
 ## Ce que fait le modèle
 
 1. **Dixon-Coles** ajusté sur 2 saisons par championnat, matchs récents pondérés plus fort.
-   La cible mélange vrais buts (45 %) et **xG Understat** (55 %), plus stables que les buts.
-2. **Elo ClubElo** (toutes les équipes européennes) : 30 % du résultat en championnat,
-   base principale en coupe d'Europe.
+   La cible mélange vrais buts et **xG** : Understat si le site répond, sinon des xG approchés
+   par les tirs et tirs cadrés (football-data.co.uk). La part des xG est choisie par l'auto-réglage,
+   qui peut aussi décider de s'en passer.
+2. **Elo ClubElo** (toutes les équipes européennes), ou à défaut un **Elo calculé par l'app**
+   sur les résultats football-data (les matchs de Ligue des champions relient les championnats).
+   Sa part est choisie par l'auto-réglage.
 3. **Fatigue** : moins de 4 jours de repos = léger malus.
 4. **Absences** (API-Football) pondérées par la part du joueur dans les xG + passes décisives attendues de l'équipe.
 5. **Cotes FR** (Betclic, Winamax, Unibet, PMU, Parions Sport, NetBet via The Odds API), marge retirée.

@@ -4,7 +4,7 @@ import unicodedata
 from difflib import SequenceMatcher
 
 STOP = {"fc", "cf", "afc", "ac", "as", "sc", "ssc", "us", "ss", "club", "calcio", "bc", "rc", "ogc",
-        "vfl", "vfb", "tsg", "sv", "fsv", "1", "cd", "ud", "sd", "rcd", "ca", "de", "del", "la", "le",
+        "vfl", "vfb", "tsg", "sv", "fsv", "1", "cd", "ud", "sd", "rcd", "ca", "de", "del", "la", "le", "sfp",
         "the", "and", "1899", "1846", "1907", "1909", "1910", "1913", "04", "05", "96", "hsc", "losc", "fk"}
 
 # formes longues -> forme courte commune
@@ -54,7 +54,10 @@ ALIASES = {
     "deportivo alaves": "alaves", "rcd espanyol de barcelona": "espanyol", "espanyol": "espanyol",
     "ud las palmas": "las palmas", "cd leganes": "leganes", "real valladolid cf": "valladolid",
     "elche cf": "elche", "levante ud": "levante", "real oviedo": "oviedo",
-    "sporting cp": "sporting", "sporting lisbon": "sporting", "sl benfica": "benfica",
+    "ath madrid": "atletico", "ath bilbao": "bilbao", "espanol": "espanyol", "vallecano": "rayo",
+    "ein frankfurt": "frankfurt", "la coruna": "deportivo", "sp gijon": "sporting gijon",
+    "sporting cp": "sporting", "sporting clube de portugal": "sporting", "sporting clube portugal": "sporting",
+    "sporting braga": "braga", "sc braga": "braga", "glasgow rangers": "rangers", "celtic glasgow": "celtic", "sporting lisbon": "sporting", "sl benfica": "benfica",
     "fc porto": "porto", "psv eindhoven": "psv", "afc ajax": "ajax", "feyenoord rotterdam": "feyenoord",
     "club brugge kv": "brugge", "club brugge": "brugge", "celtic fc": "celtic", "rangers fc": "rangers",
     "galatasaray sk": "galatasaray", "fenerbahce sk": "fenerbahce", "red bull salzburg": "salzburg",
@@ -77,12 +80,23 @@ def norm(name: str) -> str:
     return ALIASES.get(core, core)
 
 
+# mots trop courants pour identifier une équipe à eux seuls ("Sporting" ne dit pas si c'est Lisbonne ou Braga)
+GENERIC = {"sporting", "real", "athletic", "atletico", "union", "inter", "olympique", "dynamo", "dinamo",
+           "racing", "sport", "city", "united", "deportivo", "stade", "red", "star", "royal", "young", "boys",
+           "paris", "saint", "st", "san", "fk", "nk", "sk", "if", "bk", "aik", "al"}
+
+
 def _score(a: str, b: str) -> float:
     if a == b:
         return 1.0
     ta, tb = set(a.split()), set(b.split())
-    if ta and tb and (ta <= tb or tb <= ta):
+    small = ta if len(ta) <= len(tb) else tb
+    if ta and tb and (ta <= tb or tb <= ta) and small - GENERIC:
         return 0.92
+    # ressemblance d'orthographe (Koeln/Koln, Olympiacos/Olympiakos) : même initiale exigée,
+    # sinon "Rangers" ressemble à "Angers"
+    if not a or not b or a[0] != b[0]:
+        return 0.0
     return SequenceMatcher(None, a, b).ratio()
 
 

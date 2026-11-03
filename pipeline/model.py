@@ -159,3 +159,54 @@ def devig(prices):
         return None
     s = sum(inv)
     return [x / s for x in inv], s - 1
+
+
+# ---------------------------------------------------------------- Elo maison (si ClubElo ne répond pas)
+LEAGUE_PRIOR = {"PL": 1620, "PD": 1600, "BL1": 1580, "SA": 1580, "FL1": 1540}
+
+
+def local_elo(matches, snapshots=(), home_adv=60):
+    """Elo calculé sur nos propres résultats, toutes compétitions football-data confondues.
+
+    matches : [(date, comp, home, away, hg, ag, neutral)]. Les matchs de Ligue des champions
+    relient les championnats entre eux. Renvoie (notes finales, {date de cliché: notes}).
+    """
+    ms = sorted(matches, key=lambda m: m[0])
+    prior = {}
+    for _, comp, h, a, *_ in ms:
+        if comp in LEAGUE_PRIOR:
+            prior.setdefault(h, LEAGUE_PRIOR[comp])
+            prior.setdefault(a, LEAGUE_PRIOR[comp])
+    r, out = {}, {}
+    snaps = sorted(snapshots)
+    si = 0
+    for d, comp, h, a, hg, ag, neutral in ms:
+        while si < len(snaps) and snaps[si] <= d:
+            out[snaps[si]] = dict(r)
+            si += 1
+        rh, ra = r.setdefault(h, prior.get(h, 1500)), r.setdefault(a, prior.get(a, 1500))
+        e = 1 / (1 + 10 ** (-(rh - ra + (0 if neutral else home_adv)) / 400))
+        s = 1.0 if hg > ag else 0.5 if hg == ag else 0.0
+        gd = abs(hg - ag)
+        g = 1.0 if gd <= 1 else 1.5 if gd == 2 else (11 + gd) / 8
+        k = (30 if comp in ("CL", "EL", "ECL") else 20) * g
+        r[h] = rh + k * (s - e)
+        r[a] = ra - k * (s - e)
+    while si < len(snaps):
+        out[snaps[si]] = dict(r)
+        si += 1
+    return r, out
+
+
+# ---------------------------------------------------------------- xG approchés par les tirs
+def shots_coefs(rows):
+    """Taux de conversion appris sur le championnat : buts ~ a x tirs cadrés + b x tirs non cadrés."""
+    X, y = [], []
+    for r in rows:
+        for g, s, st in ((r["hg"], r["hs"], r["hst"]), (r["ag"], r["as"], r["ast"])):
+            X.append((st, max(s - st, 0)))
+            y.append(g)
+    if len(y) < 100:
+        return 0.30, 0.03
+    coef = np.linalg.lstsq(np.array(X, float), np.array(y, float), rcond=None)[0]
+    return float(np.clip(coef[0], 0.15, 0.45)), float(np.clip(coef[1], 0.0, 0.10))

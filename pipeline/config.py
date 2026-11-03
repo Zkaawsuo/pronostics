@@ -28,7 +28,7 @@ ELO_WEIGHT_DOMESTIC = 0.30  # part de l'Elo dans les buts attendus en championna
 MARKET_WEIGHT = 0.60        # part du marché dans la proba finale quand les cotes existent
 ELO_HOME_ADV = 60           # avantage domicile en points Elo
 
-TUNE_XG = [0.35, 0.55, 0.75]
+TUNE_XG = [0.0, 0.35, 0.55, 0.75]   # 0 = buts réels seuls : les xG doivent prouver leur utilité
 TUNE_XI = [0.0020, 0.0030, 0.0045]
 TUNE_ELO = [0.0, 0.15, 0.30, 0.45]
 TUNE_MARKET = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]

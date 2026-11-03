@@ -16,7 +16,7 @@ import config as C
 import sources as S
 import tickets as T
 from build_utils import dt
-from model import DixonColes, devig, elo_rates, markets_from_matrix, score_matrix
+from model import DixonColes, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, shots_coefs
 from names import Matcher, norm
 
 NOW = datetime.fromisoformat(os.environ["PRONOS_NOW"]) if os.getenv("PRONOS_NOW") else datetime.now(timezone.utc)
@@ -36,6 +36,9 @@ def load(name, default):
 
 def save(name, obj):
     (DATA / name).write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
+
+
+S_COEF = {}   # taux de conversion des tirs par championnat
 
 
 def mkey(comp, date, home, away):
@@ -93,18 +96,20 @@ understat = {}       # comp -> {"dates": [...], "players": [...]}
 for code, comp in C.COMPETITIONS.items():
     if not comp["fd"]:
         continue
-    rows = fd.matches(comp["fd"], season)
-    if comp["domestic"]:
-        rows += fd.matches(comp["fd"], season - 1)
+    rows = fd.matches(comp["fd"], season) + fd.matches(comp["fd"], season - 1)
     fd_matches[code] = rows
-    if comp["us"]:
+    # Understat : si le site a refusé au dernier passage, on ne réessaie qu'une fois par jour
+    skip_us = state.get("understat_retry_after") and NOW < dt(state["understat_retry_after"])
+    if comp["us"] and not skip_us:
         cur = S.understat_league(comp["us"], season)
-        prev = S.understat_league(comp["us"], season - 1)
+        prev = S.understat_league(comp["us"], season - 1) if cur else {}
         understat[code] = {"dates": cur.get("dates", []) + prev.get("dates", []),
                            "players": cur.get("players", [])}
-
-elo = S.clubelo_ratings(NOW)
-elo_match = Matcher(elo.keys())
+if not skip_us:
+    if any(u["dates"] for u in understat.values()):
+        state.pop("understat_retry_after", None)
+    else:
+        state["understat_retry_after"] = (NOW + timedelta(hours=20)).isoformat()
 
 # calendrier des coupes absentes de football-data (EL, ECL) via l'API cotes (gratuit)
 cup_events = {}
@@ -130,6 +135,15 @@ for g in team_games.values():
     g.sort(key=lambda x: x["date"])
 fd_team_match = Matcher(team_games.keys() | crests.keys())
 
+all_fd = [(dt(m["date"]), code, m["home"], m["away"], m["hg"], m["ag"], (m.get("stage") or "") == "FINAL")
+          for code, rows in fd_matches.items() for m in rows if m["status"] == "FINISHED" and m["hg"] is not None]
+elo = S.clubelo_ratings(NOW)
+elo_source = "clubelo" if elo else None
+if not elo and all_fd:
+    elo = {t: {"elo": v} for t, v in local_elo(all_fd)[0].items()}
+    elo_source = "local"
+elo_match = Matcher(elo.keys())
+
 # ======================================================================== 3. xG Understat rattachés
 xg_by_match = {}           # (comp, jour, nom FD dom, nom FD ext) -> (xg dom, xg ext)
 team_xg = defaultdict(list)
@@ -138,7 +152,7 @@ for code, us in understat.items():
     titles = {d["h"]["title"] for d in us["dates"]} | {d["a"]["title"] for d in us["dates"]}
     fd_names = {m["home"] for m in fd_matches.get(code, [])} | {m["away"] for m in fd_matches.get(code, [])}
     mt = Matcher(fd_names)
-    to_fd = {t: mt.find(t, 0.72) for t in titles}
+    to_fd = {t: mt.find(t, 0.78) for t in titles}
     miss = [t for t, v in to_fd.items() if v is None]
     if miss:
         S.log(f"xG non rattachés ({code}) : {', '.join(sorted(miss)[:6])}")
@@ -167,6 +181,33 @@ for code, us in understat.items():
         if tot.get(team):
             for k in ps:
                 ps[k] = ps[k] / tot[team]
+xg_source = {}
+for code in understat:
+    if any(k[0] == code for k in xg_by_match):
+        xg_source[code] = "understat"
+for code, comp in C.COMPETITIONS.items():
+    if not comp["domestic"] or code in xg_source or code not in S.FDUK:
+        continue
+    rows = S.fduk_season(code, season) + S.fduk_season(code, season - 1)
+    if not rows:
+        continue
+    a_sot, b_off = S_COEF[code] = shots_coefs(rows)
+    fd_names = {m["home"] for m in fd_matches.get(code, [])} | {m["away"] for m in fd_matches.get(code, [])}
+    mt = Matcher(fd_names)
+    miss = set()
+    for r in rows:
+        h, a = mt.find(r["home"], 0.78), mt.find(r["away"], 0.78)
+        if not h or not a:
+            miss.update(x for x, y in ((r["home"], h), (r["away"], a)) if not y)
+            continue
+        xh = a_sot * r["hst"] + b_off * max(r["hs"] - r["hst"], 0)
+        xa = a_sot * r["ast"] + b_off * max(r["as"] - r["ast"], 0)
+        xg_by_match[(code, r["date"], h, a)] = (round(xh, 2), round(xa, 2))
+        team_xg[h].append((r["date"], xh, xa))
+        team_xg[a].append((r["date"], xa, xh))
+    if miss:
+        S.log(f"Tirs non rattachés ({code}) : {', '.join(sorted(miss)[:6])}")
+    xg_source[code] = "tirs"
 for v in team_xg.values():
     v.sort()
 
@@ -318,13 +359,22 @@ history = {k: v for k, v in history.items() if (NOW - dt(v["date"])).days < 400}
 # ======================================================================== 7. auto-réglage
 # 7a. test glissant hebdo : xG, mémoire du modèle et poids de l'Elo choisis sur 12 semaines réelles
 bt = state.get("backtest")
-if league_table and (not bt or bt.get("v") != 2 or (NOW - dt(bt["at"])).days >= 6):
+if bt and bt.get("v") != 3:   # nouvelles sources (Elo maison, xG par les tirs) : on repart des réglages de départ
+    for k in ("xg_weight", "xi", "elo_weight", "at"):
+        tuned.pop(k, None)
+if league_table and (not bt or bt.get("v") != 3 or (NOW - dt(bt["at"])).days >= 6):
     starts = [NOW - timedelta(days=7 * w) for w in range(12, 0, -1)]
     elo_hist = {}
-    for st in starts:
-        r = S.clubelo_ratings(st, quiet=True)
-        elo_hist[st] = (r, Matcher(r.keys())) if r else None
-    xg_grid = C.TUNE_XG if xg_by_match else [C.XG_WEIGHT]
+    if elo_source == "clubelo":
+        for st in starts:
+            r = S.clubelo_ratings(st, quiet=True)
+            elo_hist[st] = (r, Matcher(r.keys())) if r else None
+    elif all_fd:
+        snaps = local_elo(all_fd, starts)[1]
+        for st in starts:
+            r = {t: {"elo": v} for t, v in snaps[st].items()}
+            elo_hist[st] = (r, Matcher(r.keys())) if r else None
+    xg_grid = C.TUNE_XG if xg_by_match else [0.0]
     rows_by = defaultdict(list)
     for xg_w in xg_grid:
         for xi in C.TUNE_XI:
@@ -375,7 +425,7 @@ if league_table and (not bt or bt.get("v") != 2 or (NOW - dt(bt["at"])).days >= 
         freq = np.bincount([0 if r["result"][0] > r["result"][1] else 1 if r["result"][0] == r["result"][1] else 2
                             for r in rows_c], minlength=3) / len(rows_c)
         base = metrics([{"p": list(freq), "result": r["result"]} for r in rows_c])
-    bt = {"v": 2, "at": NOW.isoformat(), "weeks": 12, "all": metrics(rows_c), "baseline": base,
+    bt = {"v": 3, "at": NOW.isoformat(), "weeks": 12, "elo_source": elo_source, "xg_source": xg_source, "all": metrics(rows_c), "baseline": base,
           "by_comp": {c: metrics([r for r in rows_c if r["comp"] == c]) for c in league_table},
           "grid": sorted([{"xg": k[0], "xi": k[1], "elo": k[2], "logloss": v["logloss"],
                            "accuracy": v["accuracy"], "n": v["n"]} for k, v in scores.items()],
@@ -659,16 +709,20 @@ weights = {"market": MKT_W, "xg": XG_W, "xi": XI, "elo": ELO_W, "tuned_at": tune
 
 # ======================================================================== 13. écriture
 save("matches.json", {"generated": NOW.isoformat(), "matches": cards, "weights": weights,
+                      "xg_source": "tirs" if "tirs" in xg_source.values() else ("understat" if xg_source else None),
                       "competitions": {k: {"name": v["name"], "flag": v["flag"]} for k, v in C.COMPETITIONS.items()}})
 save("tickets.json", tk)
 save("performance.json", {"generated": NOW.isoformat(), "live": live, "backtest": bt, "weights": weights})
 save("meta.json", {"generated": NOW.isoformat(), "warnings": S.LOG[-30:],
                    "sources": {"football_data": bool(C.FD_KEY) and any(fd_matches.values()),
-                               "understat": bool(xg_by_match), "clubelo": bool(elo), "odds": bool(odds_cache),
+                               "understat": "understat" in xg_source.values(), "shots_xg": "tirs" in xg_source.values(),
+                               "clubelo": elo_source == "clubelo", "elo_local": elo_source == "local",
+                               "odds": bool(odds_cache),
                                "absences": any(absences.values()),
                                "odds_last": max(last_by.values()) if last_by else None,
                                "odds_credits_left": state.get("odds_remaining")},
-                   "model": {"leagues_fitted": list(models), "xg_matches": len(xg_by_match),
+                   "model": {"leagues_fitted": list(models), "xg_matches": len(xg_by_match), "xg_source": xg_source,
+                             "shots_coefs": {k: [round(a, 3), round(b, 3)] for k, (a, b) in S_COEF.items()},
                              "rho": {k: round(m.rho, 3) for k, m in models.items()},
                              "home_adv": {k: round(math.exp(m.home_adv), 3) for k, m in models.items()}}})
 save("history.json", history)
