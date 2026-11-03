@@ -13,7 +13,7 @@ import config
 # Robot identifié honnêtement, au format standard des robots (avec une adresse de contact).
 UA = {"User-Agent": "Mozilla/5.0 (compatible; pronostics-perso/2.0; +https://github.com/Zkaawsuo/pronostics)"}
 LOG = []  # avertissements remontés dans l'app (meta.json, PUBLIC : jamais de clé dedans)
-_SECRETS = [k for k in (config.FD_KEY, config.AF_KEY, config.ODDS_KEY) if k]
+_SECRETS = [k for k in (config.FD_KEY, config.AF_KEY, config.ODDS_KEY) if len(k) >= 8]
 
 
 def log(msg):
@@ -77,7 +77,12 @@ class FootballData:
                  headers={"X-Auth-Token": self.key})
         self.last = time.time()
         if r is None or r.status_code != 200:
-            log(f"football-data {code} {season} : {getattr(r, 'status_code', 'réseau')}")
+            detail = ""
+            try:
+                detail = " (" + str(r.json().get("message", ""))[:90] + ")"
+            except (ValueError, AttributeError):
+                pass
+            log(f"football-data {code} {season} : HTTP {getattr(r, 'status_code', 'réseau')}{detail}")
             return []
         out = []
         for m in r.json().get("matches", []):

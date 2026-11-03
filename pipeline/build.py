@@ -117,6 +117,15 @@ for code, comp in C.COMPETITIONS.items():
     if comp["fd"] is None and C.ODDS_KEY:
         cup_events[code] = odds_api.events(comp["odds"])
 
+# panne de football-data (clé refusée, site en rade) : on garde les pronos du dernier calcul réussi
+if C.FD_KEY and not any(fd_matches.values()):
+    S.log("football-data n'a rien renvoyé : l'appli garde les pronos du dernier calcul réussi")
+    meta = load("meta.json", {})
+    meta.update({"warnings": S.LOG[-30:], "stale_since": meta.get("stale_since") or NOW.isoformat(),
+                 "checked": NOW.isoformat()})
+    save("meta.json", meta)
+    raise SystemExit(0)
+
 # ======================================================================== 2. historique des équipes
 team_games = defaultdict(list)   # nom FD -> matchs joués (toutes compétitions FD)
 crests, shorts = {}, {}
@@ -425,12 +434,15 @@ if league_table and (not bt or bt.get("v") != 3 or (NOW - dt(bt["at"])).days >= 
         freq = np.bincount([0 if r["result"][0] > r["result"][1] else 1 if r["result"][0] == r["result"][1] else 2
                             for r in rows_c], minlength=3) / len(rows_c)
         base = metrics([{"p": list(freq), "result": r["result"]} for r in rows_c])
-    bt = {"v": 3, "at": NOW.isoformat(), "weeks": 12, "elo_source": elo_source, "xg_source": xg_source, "all": metrics(rows_c), "baseline": base,
+    new_bt = {"v": 3, "at": NOW.isoformat(), "weeks": 12, "elo_source": elo_source, "xg_source": xg_source, "all": metrics(rows_c), "baseline": base,
           "by_comp": {c: metrics([r for r in rows_c if r["comp"] == c]) for c in league_table},
           "grid": sorted([{"xg": k[0], "xi": k[1], "elo": k[2], "logloss": v["logloss"],
                            "accuracy": v["accuracy"], "n": v["n"]} for k, v in scores.items()],
                          key=lambda g: g["logloss"])[:8]}
-    state["backtest"] = bt
+    if rows_c:
+        bt = state["backtest"] = new_bt
+    else:   # pas assez de données ce coup-ci : on garde le test précédent et on réessaiera
+        S.log("Test glissant impossible faute de données : le précédent est conservé")
 
 # 7b. poids du marché, appris sur nos propres pronos vérifiés
 with_mkt = [h for h in history.values() if h.get("result") and h.get("pk") and h.get("pm")]

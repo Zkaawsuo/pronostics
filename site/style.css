@@ -209,3 +209,4 @@ td.hl { color: var(--accent); font-weight: 600; }
 .sheet > .meta { padding-right: 44px; }
 .cal { max-width: 460px; display: block; }
 .big-teams .crest.ph { display: grid; place-items: center; font-size: 18px; }
+.note.stale { grid-column: 1 / -1; background: #2d2208; border: 1px solid #5a4318; border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; }

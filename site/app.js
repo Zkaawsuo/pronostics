@@ -102,7 +102,7 @@ function renderMatches() {
     }
     html += cardHTML(m);
   }
-  $("#match-list").innerHTML = html + disclaimer();
+  $("#match-list").innerHTML = staleBanner() + html + disclaimer();
   $("#match-list").onclick = (e) => { const c = e.target.closest(".card"); if (c) openSheet(c.dataset.key); };
 }
 
@@ -407,6 +407,12 @@ function tuningHTML() {
       <li>Part de l'Elo : <b>${Math.round(w.elo * 100)} %</b></li>
       <li>Part du marché dans la proba finale : <b>${Math.round(w.market * 100)} %</b>${w.market_tuned ? " (appris sur tes pronos vérifiés)" : " (réglage de départ, ajusté dès 150 matchs vérifiés)"}</li>
     </ul>${grid}`;
+}
+
+function staleBanner() {
+  const m = S.meta;
+  if (!m || !m.stale_since) return "";
+  return `<p class="note stale">⚠ La source des matchs ne répond plus depuis ${relTime(m.stale_since)} : tu vois les pronos du dernier calcul réussi (${relTime(S.data.generated)}).</p>`;
 }
 
 function disclaimer() {
