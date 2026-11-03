@@ -78,6 +78,7 @@ def candidates(cards, book, now, window_h):
                 continue
             out.append({"key": c["key"], "comp": c["comp"], "date": c["date"],
                         "match": f"{c['home']['name']} – {c['away']['name']}",
+                        "hc": c["home"].get("crest") or "", "ac": c["away"].get("crest") or "",
                         "sel": sel, "label": LABELS[sel].format(h=c["home"]["name"], a=c["away"]["name"]),
                         "p": round(p, 3), "odd": round(odd, 2), "est": est})
     return out
@@ -125,25 +126,56 @@ def search(cands, fm, per_bucket=6, width=0.04):
             "first": legs[0]["date"]}
 
 
+def _formulas(cards, book, now, windows):
+    res = {}
+    for fid, fm in FORMULAS.items():
+        t = None
+        for win in windows:
+            t = search(candidates(cards, book, now, win), fm)
+            if t:
+                t["window_h"] = win
+                break
+        res[fid] = t
+    return res
+
+
+def combis_du_jour(cards, now, n=3):
+    """Les combis sur un même match les plus probables, cote juste entre 2 et 5,5 (une par match)."""
+    from build_utils import dt
+    t_min = now + timedelta(minutes=C.TICKET_MIN_LEAD_MIN)
+    for win in (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2):
+        pool = []
+        for c in cards:
+            if not (t_min <= dt(c["date"]) <= now + timedelta(hours=win)) or not c.get("market"):
+                continue
+            for cb in c.get("combos", []):
+                if 2.0 <= cb["fair"] <= 5.5:
+                    pool.append({**cb, "key": c["key"], "comp": c["comp"], "date": c["date"],
+                                 "match": f"{c['home']['name']} – {c['away']['name']}",
+                                 "hc": c["home"].get("crest") or "", "ac": c["away"].get("crest") or ""})
+                    break   # la meilleure combi du match suffit
+        if len(pool) >= n:
+            break
+    pool.sort(key=lambda x: -x["p"])
+    return pool[:n]
+
+
 def build_all(cards, now):
     books = {}
     for c in cards:
         for b in c["books"]:
             books[b["book"]] = books.get(b["book"], 0) + 1
     order = sorted(books, key=lambda b: (b != C.TRACK_BOOK, -books[b]))
-    by_book = {}
+    comps = sorted({c["comp"] for c in cards})
+    by_book, by_comp = {}, {}
     for book in order:
-        res = {}
-        for fid, fm in FORMULAS.items():
-            t = None
-            for win in (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2):
-                t = search(candidates(cards, book, now, win), fm)
-                if t:
-                    t["window_h"] = win
-                    break
-            res[fid] = t
-        by_book[book] = res
-    return {"books": order, "coverage": books, "by_book": by_book,
+        by_book[book] = _formulas(cards, book, now, (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2))
+        # tickets spéciaux par compétition : on va chercher jusqu'à la semaine si besoin (ex. LDC le week-end)
+        by_comp[book] = {comp: _formulas([c for c in cards if c["comp"] == comp], book, now,
+                                         (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2, C.HORIZON_DAYS * 24))
+                         for comp in comps}
+    return {"books": order, "coverage": books, "by_book": by_book, "by_comp": by_comp, "comps": comps,
+            "combis": combis_du_jour(cards, now),
             "formulas": {k: {kk: vv for kk, vv in v.items() if kk != "band"} | {"band": list(v["band"])}
                          for k, v in FORMULAS.items()}}
 

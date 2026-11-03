@@ -8,7 +8,7 @@ const store = {
 };
 
 const S = { data: null, perf: null, meta: null, tickets: null, comp: store.get("comp", "ALL"), day: "all", conf: 0,
-  combo: store.get("combo", []), book: store.get("book", null), stake: store.get("stake", "5") };
+  combo: store.get("combo", []), book: store.get("book", null), stake: store.get("stake", "5"), tcomp: store.get("tcomp", "ALL") };
 const fmtWhen = (iso) => { const d = new Date(iso); return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
 const n2 = (x) => Number(x).toFixed(2).replace(".", ",");
 const dec = (x) => String(x).replace(".", ",");
@@ -120,7 +120,7 @@ function cardHTML(m) {
     <div class="meta"><span>${c.flag} ${esc(c.name)}</span><span>${time}</span></div>
     <div class="teams">
       <div class="team">${crest(m.home.crest, m.home.name)}<span>${esc(m.home.name)}</span></div>
-      <div class="score-guess">${esc(m.scores[0].score)}</div>
+      <div class="score-guess">${esc((m.pick_score || m.scores[0]).score)}</div>
       <div class="team r">${crest(m.away.crest, m.away.name)}<span>${esc(m.away.name)}</span></div>
     </div>
     ${bar(f, m.pick)}
@@ -142,12 +142,12 @@ function openSheet(key) {
   const d = new Date(m.date);
   const row = (lbl, k) => `<tr><td>${lbl}</td><td>${pct(mo[k])}</td><td>${mk ? pct(mk[k]) : "–"}</td><td class="hl">${pct(f[k])}</td></tr>`;
   const form = (t) => t.form.length ? `<div class="form">${t.form.map((x) => `<span class="fb ${x.r}" title="${esc(x.opp)}">${x.s}</span>`).join("")}</div>` : '<span class="src">–</span>';
-  const xg = (t) => t.xg ? `${t.xg.for} créés · ${t.xg.against} concédés` : "–";
+  const xg = (t) => t.xg ? `${dec(t.xg.for)} créés · ${dec(t.xg.against)} concédés` : "–";
   const abs = (t) => t.absences.length ? t.absences.map((a) => `${esc(a.player)}${a.doubt ? " (incertain)" : ""}`).join(", ") : "Aucune signalée";
   const inC = (sel) => S.combo.some((x) => x.id === m.key + "|" + sel) ? "in" : "";
   const addBtn = (sel, lbl, p) => `<button class="add ${inC(sel)}" data-sel="${sel}">${lbl}<b>${pct(p)}</b></button>`;
 
-  $("#sheet").innerHTML = `<div class="grab"></div><button class="close" aria-label="Fermer">×</button>
+  $("#sheet").innerHTML = `<div class="sheet-top"><span></span><div class="grab"></div><button class="close" aria-label="Fermer">×</button></div>
     <div class="meta"><span>${c.flag} ${esc(c.name)}</span><span>${d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
     <div class="big-teams">
       <div>${crest(m.home.crest, m.home.name)}<div class="n">${esc(m.home.name)}</div><div class="elo">${m.home.elo ? "Elo " + m.home.elo : ""}</div></div>
@@ -166,7 +166,11 @@ function openSheet(key) {
       <tr><td>Les 2 marquent</td><td>${pct(mo.btts)}</td><td>–</td><td class="hl">${pct(f.btts)}</td></tr>
       <tr><td>+1,5 / +3,5 buts</td><td>${pct(mo["over_1.5"])} / ${pct(mo["over_3.5"])}</td><td>–</td><td></td></tr>
     </table>
-    <p class="src" style="margin-top:6px">Finale = ${mk ? `${Math.round(W().market * 100)} % marché + ${100 - Math.round(W().market * 100)} % modèle` : "modèle seul (pas de cotes)"}. Scores les plus probables : ${m.scores.map((s) => `${s.score} (${pct(s.p)})`).join(", ")}</p>
+    <p class="src" style="margin-top:6px">Finale = ${mk ? `${Math.round(W().market * 100)} % marché + ${100 - Math.round(W().market * 100)} % modèle` : "modèle seul (pas de cotes)"}.${m.pick_score ? ` Si ${m.pick === "home" ? esc(m.home.name) + " gagne" : m.pick === "away" ? esc(m.away.name) + " gagne" : "c'est nul"}, le score le plus probable est ${m.pick_score.score}.` : ""} Scores exacts les plus probables : ${m.scores.map((s) => `${s.score} (${pct(s.p)})`).join(", ")}</p>
+    ${m.combos && m.combos.length ? `<h3>Combis du match (MyCombi)</h3>
+    <table><tr><th></th><th>Chance</th><th>Cote juste</th></tr>
+      ${m.combos.map((c) => `<tr><td>${esc(c.label)}</td><td>${pct(c.p)}</td><td class="hl">${n2(c.fair)}</td></tr>`).join("")}</table>
+    <p class="src" style="margin-top:6px">Ces cotes ne sont pas dans nos sources. Compare dans MyCombi : la combi ne vaut le coup que si Betclic paie plus que la cote juste.</p>` : ""}
 
     ${m.books.length ? `<h3>Cotes ${mk ? "· relevées " + relTime(mk.at) : ""}</h3>
     <table><tr><th></th><th>1</th><th>N</th><th>2</th><th>Marge</th></tr>
@@ -216,14 +220,45 @@ function renderTickets() {
     const c = e.target.closest(".chip"); if (!c) return;
     S.book = c.dataset.b; store.set("book", S.book); renderTickets();
   };
-  const res = T.by_book[S.book] || {};
+  const comps = (T.comps || []).filter((c) => S.data && S.data.competitions[c]);
+  if (S.tcomp !== "ALL" && !comps.includes(S.tcomp)) S.tcomp = "ALL";
+  $("#tcomp-chips").innerHTML = [["ALL", "Toutes compétitions"]].concat(comps.map((c) => [c, `${S.data.competitions[c].flag} ${S.data.competitions[c].name}`]))
+    .map(([k, l]) => `<button class="chip small ${S.tcomp === k ? "on" : ""}" data-c="${k}">${esc(l)}</button>`).join("");
+  $("#tcomp-chips").onclick = (e) => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    S.tcomp = c.dataset.c; store.set("tcomp", S.tcomp); renderTickets();
+  };
+  const res = currentTickets();
   $("#tickets").innerHTML = Object.entries(T.formulas).map(([fid, fm]) => ticketHTML(fid, fm, res[fid])).join("") +
     `<p class="src tnote">Rendement moyen = ce que le ticket rapporte en moyenne par euro misé, d'après les probas de l'app. Négatif = la marge du bookmaker l'emporte : c'est le cas le plus fréquent. Les cotes marquées ≈ (double chance) sont estimées : vérifie-les chez ${esc(S.book)}.</p>`;
   $("#tickets").onclick = (e) => {
     const b = e.target.closest(".copy"); if (!b) return;
     copyTicket(b.dataset.f);
   };
+  $("#combis").innerHTML = combisHTML();
   $("#tickets-track").innerHTML = trackHTML();
+}
+
+function currentTickets() {
+  const T = S.tickets;
+  if (S.tcomp === "ALL") return T.by_book[S.book] || {};
+  return ((T.by_comp || {})[S.book] || {})[S.tcomp] || {};
+}
+
+function crests(hc, ac) {
+  const one = (u) => (u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : "");
+  return hc || ac ? `<span class="lcrests">${one(hc)}${one(ac)}</span>` : "";
+}
+
+function combisHTML() {
+  const list = (S.tickets && S.tickets.combis) || [];
+  if (!list.length) return "";
+  return `<h3 class="day">🎯 Combis du jour (MyCombi)</h3>
+    <p class="src" style="margin-bottom:8px">Deux paris sur le même match, liés entre eux : l'app calcule la vraie chance que les deux passent ensemble. Betclic ne publie pas ces cotes dans nos sources, donc à toi de comparer.</p>
+    <div class="combis">${list.map((c) => `<div class="combi">
+      <div class="cmain">${crests(c.hc, c.ac)}<div><span class="lsel">${esc(c.label)}</span><small>${esc(c.match)} · ${fmtWhen(c.date)}</small></div></div>
+      <div class="cnums"><span><b>${pct(c.p)}</b><small>de chances</small></span><span><b>${n2(c.fair)}</b><small>cote juste</small></span></div>
+      <p class="src">Intéressant seulement si MyCombi affiche plus de <b>${n2(c.fair)}</b>.</p></div>`).join("")}</div>`;
 }
 
 function ticketHTML(fid, fm, t) {
@@ -234,7 +269,7 @@ function ticketHTML(fid, fm, t) {
   const stake = parseFloat(String(S.stake).replace(",", ".")) || 0;
   const flag = (c) => (S.data && S.data.competitions[c] ? S.data.competitions[c].flag : "");
   const legs = t.legs.map((l) => `<li class="${new Date(l.date) <= now ? "past" : ""}">
-      <div><span class="lsel">${esc(l.label)}</span><small>${flag(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)}</small></div>
+      <div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span><small>${flag(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)}</small></div></div>
       <div class="lright"><b>${l.est ? "≈" : ""}${n2(l.odd)}</b><small>${pct(l.p)}</small></div></li>`).join("");
   const ev = Math.round(t.ev * 100);
   return `<article class="ticket t-${fid}">${head(t.odds)}
@@ -245,14 +280,14 @@ function ticketHTML(fid, fm, t) {
     </div>
     <ul class="legs">${legs}</ul>
     ${started ? '<p class="note">⚠ Un match a déjà commencé : ce ticket n\'est plus jouable tel quel. Il sera remplacé au prochain calcul.</p>' : ""}
-    ${t.window_h > 48 ? `<p class="src">Pas assez de matchs dans les 48 h : ticket élargi aux ${t.window_h} h.</p>` : ""}
+    ${t.window_h > 48 ? `<p class="src">${t.window_h > 100 ? "Construit avec les matchs de la semaine (rien de jouable dans les 4 prochains jours)." : "Pas assez de matchs dans les 48 h : ticket élargi aux 4 prochains jours."}</p>` : ""}
     <div class="tfoot"><span class="src">${stake ? `${euro(stake)} → <b>${euro(stake * t.odds)}</b> si ça passe` : "Indique une mise"}</span>
       <button class="copy" data-f="${fid}">Copier</button></div>
   </article>`;
 }
 
 function copyTicket(fid) {
-  const T = S.tickets, fm = T.formulas[fid], t = (T.by_book[S.book] || {})[fid];
+  const T = S.tickets, fm = T.formulas[fid], t = currentTickets()[fid];
   if (!t) return;
   const txt = `${fm.emoji} Ticket ${fm.name} (${S.book}) – cote ${n2(t.odds)} – ${pct(t.p)} de chances\n` +
     t.legs.map((l) => `• ${l.label} (${l.match}, ${fmtWhen(l.date)}) @${l.est ? "≈" : ""}${n2(l.odd)}`).join("\n");

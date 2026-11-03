@@ -127,7 +127,35 @@ def markets_from_matrix(m):
         p[f"over_{line}"] = float(m[tot > line].sum())
     flat = np.argsort(m, axis=None)[::-1][:3]
     p["top_scores"] = [{"score": f"{i // MAXG}-{i % MAXG}", "p": round(float(m.flat[i]), 3)} for i in flat]
+    # score le plus probable DANS chaque issue : le 1-1 est souvent le score le plus probable tout court,
+    # même quand une équipe est nettement favorite (les victoires se répartissent sur 1-0, 2-0, 2-1...)
+    i, j = np.indices(m.shape)
+    p["by_outcome"] = {}
+    for name, mask in (("home", i > j), ("draw", i == j), ("away", i < j)):
+        k = int(np.argmax(np.where(mask, m, -1.0)))
+        p["by_outcome"][name] = {"score": f"{k // MAXG}-{k % MAXG}", "p": round(float(m.flat[k]), 3)}
     return p
+
+
+def combos(m, final):
+    """Combinaisons sur un même match (type MyCombi de Betclic).
+
+    La partie « résultat » est calée sur la proba finale (modèle + marché) ; la partie « buts » vient
+    de la matrice de scores du modèle, sachant ce résultat. Les deux sont liées : une victoire de
+    favori s'accompagne plus souvent de buts, c'est pour ça qu'on ne multiplie pas simplement.
+    """
+    i, j = np.indices(m.shape)
+    tot = i + j
+    btts = (i > 0) & (j > 0)
+    out = []
+    for side, region, nil in (("home", i > j, j == 0), ("away", i < j, i == 0)):
+        mass = m[region].sum()
+        if mass <= 1e-9:
+            continue
+        for cond, mask in (("over_1.5", tot > 1.5), ("over_2.5", tot > 2.5), ("btts", btts), ("nil", nil)):
+            out.append({"side": side, "cond": cond, "p": float(final[side] * m[region & mask].sum() / mass)})
+    out.append({"side": None, "cond": "btts_over_2.5", "p": float(m[btts & (tot > 2.5)].sum())})
+    return out
 
 
 # ---------------------------------------------------------------- Elo -> buts attendus

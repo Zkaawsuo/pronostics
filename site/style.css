@@ -210,3 +210,28 @@ td.hl { color: var(--accent); font-weight: 600; }
 .cal { max-width: 460px; display: block; }
 .big-teams .crest.ph { display: grid; place-items: center; font-size: 18px; }
 .note.stale { grid-column: 1 / -1; background: #2d2208; border: 1px solid #5a4318; border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; }
+
+/* logos dans les tickets */
+.lmain, .cmain { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.lcrests { display: flex; flex: none; }
+.lcrests img { width: 22px; height: 22px; object-fit: contain; }
+.lcrests img + img { margin-left: -6px; }
+.chip.small { padding: 5px 10px; font-size: 12px; }
+#tcomp-chips { margin-top: -2px; }
+/* combis */
+.combis { display: grid; gap: 10px; }
+.combi { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--r); padding: 12px; }
+.cnums { display: flex; gap: 18px; margin: 10px 0 4px; }
+.cnums b { font-family: var(--cond); font-size: 22px; display: block; }
+.cnums small { font-size: 11px; color: var(--mute); }
+@media (min-width: 980px) { .combis { grid-template-columns: repeat(3, 1fr); } #combis { margin-top: 6px; } }
+
+/* en-tête collant de la fiche : le contenu passe dessous au lieu d'être recouvert */
+.sheet-top { position: sticky; top: -8px; z-index: 3; display: grid; grid-template-columns: 34px 1fr 34px; align-items: center;
+  background: var(--bg2); margin: -8px -16px 6px; padding: 8px 16px 6px; }
+.sheet-top .grab { margin: 0 auto; }
+.sheet-top .close { position: static; float: none; margin: 0; }
+.sheet > .meta { padding-right: 0; }
+.combi .lsel, .combi small { display: block; }
+.combi small { font-size: 12px; color: var(--mute); margin-top: 2px; }
+@media (min-width: 980px) { .sheet-top { margin: -18px -24px 8px; padding: 12px 24px 8px; top: -18px; } .sheet-top .grab { display: block; visibility: hidden; } }

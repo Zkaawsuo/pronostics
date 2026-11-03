@@ -16,7 +16,7 @@ import config as C
 import sources as S
 import tickets as T
 from build_utils import dt
-from model import DixonColes, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, shots_coefs
+from model import DixonColes, combos, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, shots_coefs
 from names import Matcher, norm
 
 NOW = datetime.fromisoformat(os.environ["PRONOS_NOW"]) if os.getenv("PRONOS_NOW") else datetime.now(timezone.utc)
@@ -613,7 +613,8 @@ for u in upcoming:
     lam *= 1 - min(0.18, 0.7 * sum(a["share"] for a in abs_h))
     mu *= 1 - min(0.18, 0.7 * sum(a["share"] for a in abs_a))
 
-    model_p = markets_from_matrix(score_matrix(lam, mu, rho))
+    mat = score_matrix(lam, mu, rho)
+    model_p = markets_from_matrix(mat)
 
     # marché
     key = mkey(code, u["date"], u["home"], u["away"])
@@ -658,6 +659,22 @@ for u in upcoming:
            "xg_home": recent_xg(u["home"]), "xg_away": recent_xg(u["away"]),
            "rest_home": rh, "rest_away": ra, "abs_home": abs_h, "abs_away": abs_a, "market": market}
 
+    # combis sur le même match (pas de cote dans nos sources : on donne la cote juste à comparer)
+    combo_out = []
+    if not any("incertain" in q for q in quality):
+        hn, an = u["home_name"], u["away_name"]
+        lbl = {("home", "over_1.5"): f"{hn} gagne + plus de 1,5 buts", ("home", "over_2.5"): f"{hn} gagne + plus de 2,5 buts",
+               ("home", "btts"): f"{hn} gagne + les 2 équipes marquent", ("home", "nil"): f"{hn} gagne sans encaisser",
+               ("away", "over_1.5"): f"{an} gagne + plus de 1,5 buts", ("away", "over_2.5"): f"{an} gagne + plus de 2,5 buts",
+               ("away", "btts"): f"{an} gagne + les 2 équipes marquent", ("away", "nil"): f"{an} gagne sans encaisser",
+               (None, "btts_over_2.5"): "Les 2 équipes marquent + plus de 2,5 buts"}
+        for cb in combos(mat, final):
+            if cb["side"] and final[cb["side"]] < 0.42:   # seulement sur un résultat crédible
+                continue
+            if 0.15 <= cb["p"] <= 0.60:
+                combo_out.append({"label": lbl[(cb["side"], cb["cond"])], "p": r3(cb["p"]), "fair": round(1 / cb["p"], 2)})
+        combo_out.sort(key=lambda x: -x["p"])
+
     value = None
     if best:
         evs = {s: final[k] * best[s]["odd"] - 1 for s, k in (("h", "home"), ("d", "draw"), ("a", "away"))}
@@ -672,10 +689,11 @@ for u in upcoming:
         "away": {"name": u["away_name"], "crest": u["away_crest"], "elo": elo_a and round(elo_a),
                  "form": ctx["form_away"], "xg": ctx["xg_away"], "rest": ra, "absences": abs_a},
         "xg": [round(lam, 2), round(mu, 2)],
-        "model": {k: r3(v) for k, v in model_p.items() if k != "top_scores"},
+        "model": {k: r3(v) for k, v in model_p.items() if k not in ("top_scores", "by_outcome")},
         "market": market and {k: (r3(v) if isinstance(v, float) else v) for k, v in market.items()},
-        "final": {k: r3(v) for k, v in final.items() if k != "top_scores"},
-        "scores": model_p["top_scores"], "best_odds": best, "books": books_out, "totals_books": totals_out,
+        "final": {k: r3(v) for k, v in final.items() if k not in ("top_scores", "by_outcome")},
+        "scores": model_p["top_scores"], "pick_score": model_p["by_outcome"][top], "combos": combo_out[:4],
+        "best_odds": best, "books": books_out, "totals_books": totals_out,
         "value": value, "pick": top, "confidence": confidence, "quality": quality,
         "why": explain(u, {"model": model_p, "lam": lam, "mu": mu}, ctx),
     })
