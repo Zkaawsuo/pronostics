@@ -10,11 +10,17 @@ import requests
 
 import config
 
-UA = {"User-Agent": "pronostics-perso/2.0"}
-LOG = []  # avertissements remontés dans l'app (meta.json)
+# Robot identifié honnêtement, au format standard des robots (avec une adresse de contact).
+UA = {"User-Agent": "Mozilla/5.0 (compatible; pronostics-perso/2.0; +https://github.com/Zkaawsuo/pronostics)"}
+LOG = []  # avertissements remontés dans l'app (meta.json, PUBLIC : jamais de clé dedans)
+_SECRETS = [k for k in (config.FD_KEY, config.AF_KEY, config.ODDS_KEY) if k]
 
 
 def log(msg):
+    msg = str(msg)
+    for k in _SECRETS:
+        msg = msg.replace(k, "***")
+    msg = re.sub(r"(apiKey|key|token)=[^&\s']+", r"\1=***", msg, flags=re.I)
     print("[!]", msg)
     LOG.append(msg)
 
@@ -34,9 +40,10 @@ def _get(url, **kw):
                 time.sleep(20 * (attempt + 1))
                 continue
             return r
-        except requests.RequestException as e:
+        except (requests.RequestException, ValueError) as e:
+            # seulement le type d'erreur : le message complet peut contenir une clé
             if attempt == 2:
-                log(f"Réseau KO sur {url.split('?')[0]} : {e}")
+                log(f"Réseau KO sur {url.split('?')[0].split('/')[2]} ({type(e).__name__})")
             time.sleep(5)
     return None
 
@@ -83,10 +90,16 @@ class FootballData:
 # ---------------------------------------------------------------- ClubElo
 def clubelo_ratings(day=None, quiet=False):
     day = (day or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
-    r = _get(f"http://api.clubelo.com/{day}")
-    if r is None or r.status_code != 200 or "Club" not in r.text[:200]:
+    codes = []
+    r = None
+    for base in ("http://api.clubelo.com", "https://api.clubelo.com"):
+        r = _get(f"{base}/{day}", headers={"Accept": "text/csv,*/*"})
+        codes.append(str(getattr(r, "status_code", "réseau")))
+        if r is not None and r.status_code == 200 and "Club" in r.text[:200]:
+            break
+    else:
         if not quiet:
-            log("ClubElo indisponible : Elo neutre utilisé")
+            log(f"ClubElo indisponible (HTTP {'/'.join(codes)}) : Elo neutre utilisé")
         return {}
     ratings = {}
     for row in csv.DictReader(io.StringIO(r.text)):
@@ -100,9 +113,11 @@ def clubelo_ratings(day=None, quiet=False):
 # ---------------------------------------------------------------- Understat (xG)
 def understat_league(league, season):
     """Renvoie {"dates": [...], "players": [...]} ou {}."""
+    codes = []
     r = _get(f"https://understat.com/getLeagueData/{league}/{season}",
-             headers={"X-Requested-With": "XMLHttpRequest",
+             headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json, text/javascript, */*",
                       "Referer": f"https://understat.com/league/{league}/{season}"})
+    codes.append(str(getattr(r, "status_code", "réseau")))
     if r is not None and r.status_code == 200:
         try:
             data = r.json()
@@ -112,6 +127,7 @@ def understat_league(league, season):
             pass
     # repli : ancienne page avec JSON intégré
     r = _get(f"https://understat.com/league/{league}/{season}")
+    codes.append(str(getattr(r, "status_code", "réseau")))
     if r is not None and r.status_code == 200:
         out = {}
         for var, key in (("datesData", "dates"), ("playersData", "players")):
@@ -123,7 +139,7 @@ def understat_league(league, season):
                     pass
         if out.get("dates"):
             return out
-    log(f"Understat {league} {season} indisponible : buts réels seuls")
+    log(f"Understat {league} {season} indisponible (HTTP {'/'.join(codes)}) : buts réels seuls")
     return {}
 
 

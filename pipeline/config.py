@@ -1,9 +1,10 @@
 """Réglages centraux du pipeline. Tout ce qui est ajustable est ici."""
 import os
 
-FD_KEY = os.getenv("FD_KEY", "")          # football-data.org
-AF_KEY = os.getenv("AF_KEY", "")          # api-football (blessures)
-ODDS_KEY = os.getenv("ODDS_KEY", "")      # the-odds-api.com (cotes)
+# .strip() : une clé collée avec un retour à la ligne fait planter les requêtes
+FD_KEY = os.getenv("FD_KEY", "").strip()          # football-data.org
+AF_KEY = os.getenv("AF_KEY", "").strip()          # api-football (blessures)
+ODDS_KEY = os.getenv("ODDS_KEY", "").strip()      # the-odds-api.com (cotes)
 
 # code interne -> infos par source
 COMPETITIONS = {

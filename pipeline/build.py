@@ -249,7 +249,7 @@ if C.ODDS_KEY:
         low = rem is not None and rem < C.ODDS_LOW_CREDITS
         if low and not hot:
             continue
-        evs = odds_api.odds(comp["odds"], C.HORIZON_DAYS * 24, markets="h2h" if low else "h2h,totals")
+        evs = odds_api.odds(comp["odds"], C.HORIZON_DAYS * 24, markets="h2h,totals" if (hot and not low) else "h2h")
         last_by[code] = NOW.isoformat()
         for e in evs:
             ed = dt(e["commence_time"])

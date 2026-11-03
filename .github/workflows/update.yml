@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main   # toujours la dernière version, avec l'historique du calcul précédent
 
       - uses: actions/setup-python@v5
         with:
@@ -41,13 +43,27 @@ jobs:
           ODDS_KEY: ${{ secrets.ODDS_KEY }}
         run: python pipeline/build.py
 
+      - name: Vérifier qu'aucune clé ne fuit
+        env:
+          FD_KEY: ${{ secrets.FD_KEY }}
+          AF_KEY: ${{ secrets.AF_KEY }}
+          ODDS_KEY: ${{ secrets.ODDS_KEY }}
+        run: |
+          for k in "$FD_KEY" "$AF_KEY" "$ODDS_KEY"; do
+            k=$(printf '%s' "$k" | tr -d '[:space:]')
+            if [ -n "$k" ] && grep -rqF -- "$k" site/; then
+              echo "::error::Une clé API a été trouvée dans les fichiers du site : publication annulée."
+              exit 1
+            fi
+          done
+
       - name: Sauvegarder l'historique
         run: |
           git config user.name "pronos-bot"
           git config user.email "pronos-bot@users.noreply.github.com"
           git add site/data
           git diff --staged --quiet || git commit -m "Pronos $(date -u +'%Y-%m-%d %H:%M')"
-          git pull --rebase --autostash || true
+          git pull --rebase -X theirs --autostash || git rebase --abort || true
           git push || true
 
       - uses: actions/upload-pages-artifact@v3
