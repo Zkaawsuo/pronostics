@@ -167,6 +167,10 @@ function openSheet(key) {
       <tr><td>+1,5 / +3,5 buts</td><td>${pct(mo["over_1.5"])} / ${pct(mo["over_3.5"])}</td><td>–</td><td></td></tr>
     </table>
     <p class="src" style="margin-top:6px">Finale = ${mk ? `${Math.round(W().market * 100)} % marché + ${100 - Math.round(W().market * 100)} % modèle` : "modèle seul (pas de cotes)"}.${m.pick_score ? ` Si ${m.pick === "home" ? esc(m.home.name) + " gagne" : m.pick === "away" ? esc(m.away.name) + " gagne" : "c'est nul"}, le score le plus probable est ${m.pick_score.score}.` : ""} Scores exacts les plus probables : ${m.scores.map((s) => `${s.score} (${pct(s.p)})`).join(", ")}</p>
+    ${m.scorers && m.scorers.length ? `<h3>Buteurs (au moins un but, s'il joue)</h3>
+    <table><tr><th></th><th>Chance</th><th>Cote juste</th></tr>
+      ${m.scorers.map((p) => `<tr><td>${esc(p.name)} <small class="src">${esc(m[p.side].name)}</small></td><td>${pct(p.p)}</td><td class="hl">${n2(p.fair)}</td></tr>`).join("")}</table>
+    <p class="src" style="margin-top:6px">Estimé à partir de ses buts cette saison et la précédente, et des buts attendus de son équipe ce jour-là. On ne connaît pas la compo : vérifie qu'il est titulaire. En général, le pari est remboursé s'il ne joue pas (vérifie la règle Betclic).</p>` : ""}
     ${m.combos && m.combos.length ? `<h3>Combis du match (MyCombi)</h3>
     <table><tr><th></th><th>Chance</th><th>Cote juste</th></tr>
       ${m.combos.map((c) => `<tr><td>${esc(c.label)}</td><td>${pct(c.p)}</td><td class="hl">${n2(c.fair)}</td></tr>`).join("")}</table>
@@ -236,6 +240,7 @@ function renderTickets() {
     copyTicket(b.dataset.f);
   };
   $("#combis").innerHTML = combisHTML();
+  $("#buteurs").innerHTML = buteursHTML();
   $("#tickets-track").innerHTML = trackHTML();
 }
 
@@ -259,6 +264,17 @@ function combisHTML() {
       <div class="cmain">${crests(c.hc, c.ac)}<div><span class="lsel">${esc(c.label)}</span><small>${esc(c.match)} · ${fmtWhen(c.date)}</small></div></div>
       <div class="cnums"><span><b>${pct(c.p)}</b><small>de chances</small></span><span><b>${n2(c.fair)}</b><small>cote juste</small></span></div>
       <p class="src">Intéressant seulement si MyCombi affiche plus de <b>${n2(c.fair)}</b>.</p></div>`).join("")}</div>`;
+}
+
+function buteursHTML() {
+  const list = (S.tickets && S.tickets.buteurs) || [];
+  if (!list.length) return "";
+  return `<h3 class="day">⚽ Buteurs du jour</h3>
+    <p class="src" style="margin-bottom:8px">Les joueurs les plus susceptibles de marquer dans les prochains matchs. Les cotes buteur de Betclic ne sont pas dans nos sources : compare toi-même, c'est intéressant seulement si Betclic paie plus que la cote juste.</p>
+    <div class="combis">${list.map((p) => `<div class="combi buteur">
+      <div class="cmain">${crests(p.crest, "")}<div><span class="lsel">${esc(p.name)}</span><small>${esc(p.team)} · ${esc(p.match)} · ${fmtWhen(p.date)}</small></div></div>
+      <div class="cnums"><span><b>${pct(p.p)}</b><small>de marquer</small></span><span><b>${n2(p.fair)}</b><small>cote juste</small></span></div></div>`).join("")}</div>
+    <p class="src" style="margin-top:6px">Vérifie qu'il est titulaire avant de jouer : l'app ne connaît pas les compos.</p>`;
 }
 
 function ticketHTML(fid, fm, t) {
@@ -422,6 +438,7 @@ function renderPerf() {
       <li>${ok(src.football_data)} Résultats & calendrier (football-data.org)</li>
       <li>${ok(src.understat || src.shots_xg)} xG ${src.understat ? "(Understat)" : src.shots_xg ? "approchés par les tirs (football-data.co.uk) : Understat bloque les robots" : "indisponibles"}</li>
       <li>${ok(src.clubelo || src.elo_local)} Elo ${src.clubelo ? "(ClubElo)" : src.elo_local ? "calculé par l'app sur les résultats : ClubElo injoignable" : "indisponible"}</li>
+      <li>${ok(src.scorers)} Buteurs ${src.scorers === "football-data" ? "(football-data.org)" : src.scorers === "maxifoot" ? "(Maxifoot, 1 fois par jour)" : "indisponibles"}</li>
       <li>${ok(src.odds)} Cotes FR (The Odds API)${src.odds_credits_left != null ? ` · ${src.odds_credits_left} crédits restants ce mois` : ""}</li>
       <li>${ok(src.absences)} Absences (API-Football)</li>
     </ul>

@@ -103,6 +103,63 @@ class FootballData:
         return out
 
 
+    def scorers(self, code, season, limit=40):
+        """Classement des buteurs (peut être réservé aux offres payantes : None si refusé)."""
+        if not self.key:
+            return None
+        wait = 6.5 - (time.time() - self.last)
+        if wait > 0:
+            time.sleep(wait)
+        r = _get(f"{self.BASE}/competitions/{code}/scorers", params={"season": season, "limit": limit},
+                 headers={"X-Auth-Token": self.key})
+        self.last = time.time()
+        if r is None or r.status_code != 200:
+            log(f"Buteurs football-data {code} : HTTP {getattr(r, 'status_code', 'réseau')}")
+            return None
+        out = []
+        for s in r.json().get("scorers", []):
+            out.append({"player": (s.get("player") or {}).get("name", ""), "team": (s.get("team") or {}).get("name", ""),
+                        "goals": s.get("goals") or 0, "pens": s.get("penalties") or 0, "matches": s.get("playedMatches") or 0})
+        return out
+
+
+# ---------------------------------------------------------------- Maxifoot (buteurs, en secours)
+def maxifoot_scorers(url):
+    """Tableau des meilleurs buteurs européens. On respecte robots.txt et on ne passe qu'une fois par jour."""
+    from urllib import robotparser
+    rr = _get("https://www.maxifoot.fr/robots.txt", tries=1, quiet=True, timeout=10)
+    if rr is not None and rr.status_code == 200:
+        rp = robotparser.RobotFileParser()
+        rp.parse(rr.text.splitlines())
+        if not rp.can_fetch(UA["User-Agent"], url):
+            log("Maxifoot refuse les robots sur cette page : buteurs non récupérés")
+            return []
+    r = _get(url, tries=2, timeout=20)
+    if r is None or r.status_code != 200:
+        log(f"Buteurs Maxifoot indisponibles ({_peek(r)[:40]})")
+        return []
+    try:
+        html = r.content.decode("utf-8")
+    except UnicodeDecodeError:
+        html = r.content.decode("latin-1", errors="replace")
+    rows = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S | re.I):
+        cells = [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", c)).strip()
+                 for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S | re.I)]
+        if len(cells) < 6:
+            continue
+        mg = re.match(r"^(\d+)(?:\s*\(\s*(\d+)\s*p\.?\s*\))?", cells[3])
+        mm = re.match(r"^(\d+)", cells[5])
+        if not (mg and mm and "b/m" in cells[5]):
+            continue
+        team = re.split(r"\s*[/(]\s*", cells[2])[0].strip()
+        rows.append({"player": cells[1], "team": team, "goals": int(mg.group(1)), "pens": int(mg.group(2) or 0),
+                     "matches": int(mm.group(1))})
+    if not rows:
+        log("Maxifoot : tableau des buteurs introuvable (mise en page changée ?)")
+    return rows
+
+
 # ---------------------------------------------------------------- ClubElo
 def clubelo_ratings(day=None, quiet=False):
     day = (day or datetime.now(timezone.utc)).strftime("%Y-%m-%d")

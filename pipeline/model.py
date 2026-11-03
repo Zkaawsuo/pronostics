@@ -238,3 +238,19 @@ def shots_coefs(rows):
         return 0.30, 0.03
     coef = np.linalg.lstsq(np.array(X, float), np.array(y, float), rcond=None)[0]
     return float(np.clip(coef[0], 0.15, 0.45)), float(np.clip(coef[1], 0.0, 0.10))
+
+
+# ---------------------------------------------------------------- buteurs
+def scorer_prob(goals, matches, team_ratio, prev_goals=0, prev_matches=0, prior=0.40, k=8, avail=1.0):
+    """Chance qu'un joueur marque au moins un but dans le match.
+
+    - rythme du joueur : ses buts par match, saison en cours + moitié de la précédente, tiré vers
+      0,40 but/match (k matchs fictifs) pour ne pas s'emballer sur une série de 10 matchs ;
+    - ajusté par les buts attendus de son équipe ce jour-là par rapport à sa moyenne ;
+    - proba « s'il joue » : chez les bookmakers français, un pari buteur est en général remboursé
+      si le joueur ne participe pas (avail permet de baisser si besoin).
+    """
+    g = goals + 0.5 * prev_goals + prior * k
+    m = matches + 0.5 * prev_matches + k
+    rate = max(g / max(m, 1), 0.01) * min(max(team_ratio, 0.6), 1.6)
+    return avail * (1 - np.exp(-rate))

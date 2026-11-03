@@ -16,7 +16,7 @@ import config as C
 import sources as S
 import tickets as T
 from build_utils import dt
-from model import DixonColes, combos, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, shots_coefs
+from model import DixonColes, combos, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, scorer_prob, shots_coefs
 from names import Matcher, norm
 
 NOW = datetime.fromisoformat(os.environ["PRONOS_NOW"]) if os.getenv("PRONOS_NOW") else datetime.now(timezone.utc)
@@ -153,6 +153,72 @@ if not elo and all_fd:
     elo = {t: {"elo": v} for t, v in local_elo(all_fd)[0].items()}
     elo_source = "local"
 elo_match = Matcher(elo.keys())
+
+# ======================================================================== 2b. buteurs (une fois par jour)
+MAXI = "https://www.maxifoot.fr/classement-buteur-europe-2{}.htm"
+sc_state = state.get("scorers") or {}
+if not sc_state.get("at") or (NOW - dt(sc_state["at"])).total_seconds() > 20 * 3600:
+    cur, prev, src = [], [], None
+    for code in ("PL", "PD", "SA", "BL1", "FL1", "CL"):       # source officielle d'abord
+        r = fd.scorers(C.COMPETITIONS[code]["fd"], season)
+        if r is None:
+            cur = []
+            break
+        cur += r
+    if cur:
+        src = "football-data"
+        for code in ("PL", "PD", "SA", "BL1", "FL1", "CL"):
+            prev += fd.scorers(C.COMPETITIONS[code]["fd"], season - 1) or []
+    else:                                                     # sinon Maxifoot (robots.txt respecté)
+        cur = S.maxifoot_scorers(MAXI.format(""))
+        prev = S.maxifoot_scorers(MAXI.format(f"-{season}")) if cur else []
+        src = "maxifoot" if cur else None
+    sc_state = state["scorers"] = {"at": NOW.isoformat(), "src": src, "cur": cur, "prev": prev}
+
+
+def _agg(rows):
+    """(joueur, équipe FD) -> buts, matchs (sommés sur les compétitions pour football-data)."""
+    out = {}
+    for r in rows:
+        team = r["team"] if r["team"] in crests else fd_team_match.find(r["team"], 0.78)
+        if not team or not r["player"]:
+            continue
+        k = (norm(r["player"]), team)
+        a = out.setdefault(k, {"name": r["player"], "team": team, "goals": 0, "matches": 0})
+        a["goals"] += r["goals"]
+        a["matches"] += r["matches"]
+    return out
+
+
+scorer_cur = _agg(sc_state.get("cur", []))
+scorer_prev = {}
+for (pn, _), a in _agg(sc_state.get("prev", [])).items():   # saison précédente : par joueur, quel que soit le club
+    p = scorer_prev.setdefault(pn, {"goals": 0, "matches": 0})
+    p["goals"] += a["goals"]
+    p["matches"] += a["matches"]
+scorers_by_team = defaultdict(list)
+for (pn, team), a in scorer_cur.items():
+    if a["matches"] >= 3:
+        scorers_by_team[team].append({**a, "pg": scorer_prev.get(pn, {}).get("goals", 0),
+                                      "pm": scorer_prev.get(pn, {}).get("matches", 0)})
+
+
+def nice_name(n):
+    return " ".join(w.capitalize() if w.isupper() else w for w in n.split())
+
+
+def scorers_for(team, lam_team, side):
+    lst = scorers_by_team.get(team, [])
+    if not lst:
+        return []
+    g = team_games.get(team, [])[-15:]
+    avg = sum(x["gf"] for x in g) / len(g) if len(g) >= 5 else lam_team
+    out = []
+    for a in lst:
+        p = scorer_prob(a["goals"], a["matches"], lam_team / max(avg, 0.3), a["pg"], a["pm"])
+        out.append({"name": nice_name(a["name"]), "side": side, "p": r3(p), "fair": round(1 / p, 2)})
+    return out
+
 
 # ======================================================================== 3. xG Understat rattachés
 xg_by_match = {}           # (comp, jour, nom FD dom, nom FD ext) -> (xg dom, xg ext)
@@ -675,6 +741,12 @@ for u in upcoming:
                 combo_out.append({"label": lbl[(cb["side"], cb["cond"])], "p": r3(cb["p"]), "fair": round(1 / cb["p"], 2)})
         combo_out.sort(key=lambda x: -x["p"])
 
+    scorers_out = []
+    if not any("incertain" in q for q in quality):
+        scorers_out = sorted(scorers_for(u["home"], lam, "home") + scorers_for(u["away"], mu, "away"),
+                             key=lambda x: -x["p"])
+        scorers_out = [x for x in scorers_out if x["p"] >= 0.18][:4]
+
     value = None
     if best:
         evs = {s: final[k] * best[s]["odd"] - 1 for s, k in (("h", "home"), ("d", "draw"), ("a", "away"))}
@@ -693,6 +765,7 @@ for u in upcoming:
         "market": market and {k: (r3(v) if isinstance(v, float) else v) for k, v in market.items()},
         "final": {k: r3(v) for k, v in final.items() if k not in ("top_scores", "by_outcome")},
         "scores": model_p["top_scores"], "pick_score": model_p["by_outcome"][top], "combos": combo_out[:4],
+        "scorers": scorers_out,
         "best_odds": best, "books": books_out, "totals_books": totals_out,
         "value": value, "pick": top, "confidence": confidence, "quality": quality,
         "why": explain(u, {"model": model_p, "lam": lam, "mu": mu}, ctx),
@@ -748,7 +821,7 @@ save("meta.json", {"generated": NOW.isoformat(), "warnings": S.LOG[-30:],
                    "sources": {"football_data": bool(C.FD_KEY) and any(fd_matches.values()),
                                "understat": "understat" in xg_source.values(), "shots_xg": "tirs" in xg_source.values(),
                                "clubelo": elo_source == "clubelo", "elo_local": elo_source == "local",
-                               "odds": bool(odds_cache),
+                               "odds": bool(odds_cache), "scorers": sc_state.get("src"),
                                "absences": any(absences.values()),
                                "odds_last": max(last_by.values()) if last_by else None,
                                "odds_credits_left": state.get("odds_remaining")},

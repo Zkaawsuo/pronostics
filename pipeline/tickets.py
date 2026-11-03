@@ -164,6 +164,29 @@ def combis_du_jour(cards, now, n=3):
     return pool[:n]
 
 
+def buteurs_du_jour(cards, now, n=5):
+    """Les joueurs les plus susceptibles de marquer dans les prochains matchs (un par équipe)."""
+    from build_utils import dt
+    t_min = now + timedelta(minutes=C.TICKET_MIN_LEAD_MIN)
+    for win in (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2):
+        pool = []
+        for c in cards:
+            if not (t_min <= dt(c["date"]) <= now + timedelta(hours=win)) or not c.get("market"):
+                continue
+            seen = set()
+            for s in c.get("scorers", []):
+                if s["side"] in seen:
+                    continue
+                seen.add(s["side"])
+                team = c[s["side"]]
+                pool.append({**s, "key": c["key"], "comp": c["comp"], "date": c["date"], "team": team["name"],
+                             "crest": team.get("crest") or "", "match": f"{c['home']['name']} – {c['away']['name']}"})
+        if len(pool) >= n:
+            break
+    pool.sort(key=lambda x: -x["p"])
+    return pool[:n]
+
+
 def build_all(cards, now):
     books = {}
     for c in cards:
@@ -179,7 +202,7 @@ def build_all(cards, now):
                                          (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2, C.HORIZON_DAYS * 24))
                          for comp in comps}
     return {"books": order, "coverage": books, "by_book": by_book, "by_comp": by_comp, "comps": comps,
-            "combis": combis_du_jour(cards, now),
+            "combis": combis_du_jour(cards, now), "buteurs": buteurs_du_jour(cards, now),
             "formulas": {k: {kk: vv for kk, vv in v.items() if kk != "band"} | {"band": list(v["band"])}
                          for k, v in FORMULAS.items()}}
 
