@@ -558,3 +558,9 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .dop { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsc { font-family: var(--cond); font-size: 16px; padding: 1px 8px; border-radius: 6px; }
 .dsc.V { background: #173f30; color: var(--win); } .dsc.N { background: #2a3530; color: var(--draw); } .dsc.D { background: #3f1d1d; color: var(--lose); }
+.t-combi { --tc: #9d6bff; }
+.t-combi .st-head { color: #fff; }
+.cin { margin: 0 14px 8px; padding: 6px 12px; }
+.cin input { font-size: 18px; }
+.cverdict { padding: 0 14px 10px; min-height: 4px; }
+.t-buteur { --tc: #5aa2ff; }

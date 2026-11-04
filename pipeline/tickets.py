@@ -165,7 +165,7 @@ def _formulas(cards, book, now, windows, alts=0):
     return res
 
 
-def combis_du_jour(cards, now, n=3):
+def combis_du_jour(cards, now, n=5):
     """Les combis sur un même match les plus probables, cote juste entre 2 et 5,5 (une par match)."""
     from build_utils import dt
     t_min = now + timedelta(minutes=C.TICKET_MIN_LEAD_MIN)

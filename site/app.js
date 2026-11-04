@@ -504,6 +504,12 @@ function renderTickets() {
     r.nextElementSibling && r.nextElementSibling.querySelectorAll("i").forEach((d, k) => d.classList.toggle("on", k === i));
   }, { passive: true }));
   $("#combis").innerHTML = combisHTML();
+  $("#buteurs").oninput = $("#combis").oninput = (e) => {
+    const inp = e.target.closest("input[data-cid]"); if (!inp) return;
+    const saved = store.get("combi_odds", {}); saved[inp.dataset.cid] = inp.value; store.set("combi_odds", saved);
+    const out = [...document.querySelectorAll(".cverdict")].find((x) => x.dataset.for === inp.dataset.cid);
+    if (out) out.innerHTML = combiVerdict(+inp.dataset.p, inp.value);
+  };
   $("#buteurs").innerHTML = buteursHTML();
   $("#tickets-track").innerHTML = trackHTML();
 }
@@ -522,23 +528,52 @@ function crests(hc, ac) {
 function combisHTML() {
   const list = (S.tickets && S.tickets.combis) || [];
   if (!list.length) return "";
-  return `<h3 class="day">🎯 Combis du jour (MyCombi)</h3>
-    <p class="src" style="margin-bottom:8px">Deux paris sur le même match, liés entre eux : l'app calcule la vraie chance que les deux passent ensemble. Betclic ne publie pas ces cotes dans nos sources, donc à toi de comparer.</p>
-    <div class="combis">${list.map((c) => `<div class="combi">
-      <div class="cmain">${crests(c.hc, c.ac)}<div><span class="lsel">${esc(c.label)}</span><small>${esc(c.match)} · ${fmtWhen(c.date)}</small></div></div>
-      <div class="cnums"><span><b>${pct(c.p)}</b><small>de chances</small></span><span><b>${n2(c.fair)}</b><small>cote juste</small></span></div>
-      <p class="src">Intéressant seulement si MyCombi affiche plus de <b>${n2(c.fair)}</b>.</p></div>`).join("")}</div>`;
+  const saved = store.get("combi_odds", {});
+  return `<section class="formula t-combi"><header class="fhead"><span class="tname">🎯 Combis du jour</span><span class="fband">à comparer dans MyCombi</span></header>
+    <div class="trail">${list.map((c, i) => {
+      const cid = c.key + "|" + c.label, v = saved[cid] || "";
+      return `<article class="slipt" style="--d:${i}">
+        <div class="st-head"><span class="st-brand">BETI<b>X</b></span><span>MyCombi</span><span class="st-no">${i + 1}/${list.length}</span></div>
+        <ul class="st-legs"><li class="sleg" style="--k:0"><div class="lmeta">${compTag(c.comp)}<span>${esc(c.match)}</span><time>${fmtWhen(c.date)}</time></div>
+          <div class="lpick"><span class="lsel">${esc(c.label)}</span></div></li></ul>
+        <div class="st-tear" aria-hidden="true"></div>
+        <div class="st-foot"><div class="st-odds"><small>Cote juste</small><b>${n2(c.fair)}</b></div>
+          <div class="st-money"><span>Chance <b>${pct(c.p)}</b></span></div></div>
+        <label class="input cin"><span class="src">Cote Betclic</span><input inputmode="decimal" data-cid="${esc(cid)}" data-p="${c.p}" placeholder="ex : ${n2(c.fair * 0.9)}" value="${esc(v)}"></label>
+        <div class="cverdict" data-for="${esc(cid)}">${combiVerdict(c.p, v)}</div>
+        <div class="st-bar" aria-hidden="true"></div>
+      </article>`;
+    }).join("")}</div>
+    ${list.length > 1 ? `<div class="tdots">${list.map((_, i) => `<i class="${i ? "" : "on"}"></i>`).join("")}</div>` : ""}
+    <p class="src tnote">La cote juste, c'est la vraie chance sans la marge du bookmaker. Tape la cote affichée par MyCombi : l'app te dit si elle vaut le coup.</p></section>`;
 }
-
+function combiVerdict(p, v) {
+  const o = num(v);
+  if (!(o > 1)) return "";
+  const ev = Math.round((p * o - 1) * 100);
+  return `<span class="tg ${ev >= 0 ? "pos" : "neg"}">${ev >= 0 ? "Bonne cote" : "Cote trop basse"} · rendement ${ev >= 0 ? "+" : ""}${ev} %</span>`;
+}
 function buteursHTML() {
   const list = (S.tickets && S.tickets.buteurs) || [];
   if (!list.length) return "";
-  return `<h3 class="day">⚽ Buteurs du jour</h3>
-    <p class="src" style="margin-bottom:8px">Les joueurs les plus susceptibles de marquer dans les prochains matchs. Les cotes buteur de Betclic ne sont pas dans nos sources : compare toi-même, c'est intéressant seulement si Betclic paie plus que la cote juste.</p>
-    <div class="combis">${list.map((p) => `<div class="combi buteur">
-      <div class="cmain">${crests(p.crest, "")}<div><span class="lsel">${esc(p.name)}</span><small>${esc(p.team)} · ${esc(p.match)} · ${fmtWhen(p.date)}</small></div></div>
-      <div class="cnums"><span><b>${pct(p.p)}</b><small>de marquer</small></span><span><b>${n2(p.fair)}</b><small>cote juste</small></span></div></div>`).join("")}</div>
-    <p class="src" style="margin-top:6px">Vérifie qu'il est titulaire avant de jouer : l'app ne connaît pas les compos.</p>`;
+  const saved = store.get("combi_odds", {});
+  return `<section class="formula t-buteur"><header class="fhead"><span class="tname">⚽ Buteurs du jour</span><span class="fband">s'il est titulaire</span></header>
+    <div class="trail">${list.map((c, i) => {
+      const cid = c.key + "|but|" + c.name, v = saved[cid] || "";
+      return `<article class="slipt" style="--d:${i}">
+        <div class="st-head"><span class="st-brand">BETI<b>X</b></span><span>Buteur</span><span class="st-no">${i + 1}/${list.length}</span></div>
+        <ul class="st-legs"><li class="sleg" style="--k:0"><div class="lmeta">${compTag(c.comp)}<span>${esc(c.match)}</span><time>${fmtWhen(c.date)}</time></div>
+          <div class="lpick"><span class="lsel">${crests(c.crest, "")} ${esc(c.name)} marque</span></div></li></ul>
+        <div class="st-tear" aria-hidden="true"></div>
+        <div class="st-foot"><div class="st-odds"><small>Cote juste</small><b>${n2(c.fair)}</b></div>
+          <div class="st-money"><span>Chance <b>${pct(c.p)}</b></span></div></div>
+        <label class="input cin"><span class="src">Cote Betclic</span><input inputmode="decimal" data-cid="${esc(cid)}" data-p="${c.p}" placeholder="ex : ${n2(c.fair * 0.9)}" value="${esc(v)}"></label>
+        <div class="cverdict" data-for="${esc(cid)}">${combiVerdict(c.p, v)}</div>
+        <div class="st-bar" aria-hidden="true"></div>
+      </article>`;
+    }).join("")}</div>
+    ${list.length > 1 ? `<div class="tdots">${list.map((_, i) => `<i class="${i ? "" : "on"}"></i>`).join("")}</div>` : ""}
+    <p class="src tnote">Vérifie la compo avant de jouer : l'app ne la connaît pas.</p></section>`;
 }
 
 const ticketsOf = (t) => (t ? [t].concat(t.alts || []) : []);
