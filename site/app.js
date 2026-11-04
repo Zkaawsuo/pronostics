@@ -829,25 +829,28 @@ function betsHTML() {
 function betCard(b, st) {
   const ret = betReturn(b, st);
   const pill = { wait: "En cours", won: "Gagné", lost: "Perdu", void: "Remboursé" }[st];
-  const legs = b.legs.map((l) => {
+  const logo = (c) => { const v = S.data && S.data.competitions[c]; return v && v.logo ? `<img class="llogo" src="${esc(v.logo)}" alt="${esc(v.name)}">` : (v ? v.flag : ""); };
+  const legs = b.legs.map((l, k) => {
     const ls = legState(l), r = S.res[l.key];
-    return `<li class="leg ${ls}"><div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span>
-      <small>${flagOf(l.comp)} ${esc(l.match)} · ${r ? `<b>${r[0]}-${r[1]}</b>` : fmtWhen(l.date)}</small></div></div>
-      <span class="lst">${{ won: "✓", lost: "✗", void: "–", wait: "" }[ls]}</span></li>`;
+    return `<li class="sleg ${ls}" style="--k:${k}">
+      <div class="lmeta">${logo(l.comp)}<span>${esc(l.match)}</span><time>${r ? `<b class="lscore">${r[0]}-${r[1]}</b>` : fmtWhen(l.date)}</time></div>
+      <div class="lpick"><span class="lsel">${esc(l.label)}</span><span class="lst">${{ won: "✓", lost: "✗", void: "–", wait: "" }[ls]}</span>${l.odd ? `<span class="obadge">${n2(l.odd)}</span>` : ""}</div></li>`;
   }).join("");
-  const money = st === "wait" ? `<span>Gain possible</span><b>${euro(b.stake * b.odds)}</b>`
-    : st === "won" ? `<span>Gagné</span><b class="pos">+${euro(ret - b.stake)}</b>`
-    : st === "lost" ? `<span>Perdu</span><b class="neg">−${euro(b.stake)}</b>` : `<span>Remboursé</span><b>${euro(b.stake)}</b>`;
-  return `<article class="bet ${st}" data-id="${b.id}">
-    <header><span class="pill ${st}">${pill}${b.manual ? " · corrigé" : ""}</span><span class="src">${esc(srcName(b.src))}</span></header>
-    <ul class="legs">${legs}</ul>
-    <div class="slip">
-      <div><span>Mise · cote</span><span><b>${euro(b.stake)}</b> <span class="obadge">${n2(b.odds)}</span></span></div>
-      <div>${money}</div>
+  const money = st === "wait" ? `<span>Gain possible <b>${euro(b.stake * b.odds)}</b></span>`
+    : st === "won" ? `<span>Gagné <b class="gain">+${euro(ret - b.stake)}</b></span>`
+    : st === "lost" ? `<span>Perdu <b class="neg">−${euro(b.stake)}</b></span>` : `<span>Remboursé <b>${euro(b.stake)}</b></span>`;
+  return `<article class="slipt bet s-${st}" data-id="${b.id}" style="--d:0">
+    <div class="st-head"><span class="st-brand">BETI<b>X</b></span><span>${esc(srcName(b.src))}</span><span class="st-no">${pill}${b.manual ? " ·  corrigé" : ""}</span></div>
+    <ul class="st-legs">${legs}</ul>
+    <div class="st-tear" aria-hidden="true"></div>
+    <div class="st-foot">
+      <div class="st-odds"><small>Cote</small><b>${n2(b.odds)}</b></div>
+      <div class="st-money"><span>Mise <b>${euro(b.stake)}</b></span>${money}</div>
     </div>
-    <div class="bfoot"><span class="src">${esc(b.book)} · joué ${new Date(b.at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span><button class="more" data-act="more" aria-label="Corriger">⋯</button></div>
+    <div class="bfoot"><span class="src">${esc(b.book)} · joué le ${new Date(b.at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span><button class="more" data-act="more" aria-label="Corriger">⋯</button></div>
     <div class="bact"><button data-act="won">Gagné</button><button data-act="lost">Perdu</button><button data-act="void">Remboursé</button>
       ${b.manual ? '<button data-act="auto">Automatique</button>' : ""}<button data-act="del" class="danger">Supprimer</button></div>
+    <div class="st-bar" aria-hidden="true"></div>
   </article>`;
 }
 

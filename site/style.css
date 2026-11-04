@@ -568,3 +568,15 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .advice { margin: -2px 14px 10px; font-size: 12px; color: var(--mute); }
 .advice b { color: var(--text); }
 .stake-row { flex-wrap: wrap; }
+/* Mes paris au format coupon */
+#mp-bets .slipt { width: auto; max-width: 520px; margin: 0 auto 14px; }
+#mp-bets .bet { padding: 0; border-left: 1px solid var(--line); }
+.slipt.s-wait { --tc: var(--accent); } .slipt.s-won { --tc: #3ddc97; } .slipt.s-lost { --tc: #ff6b6b; } .slipt.s-void { --tc: #a5afc8; }
+.slipt.s-lost .st-head { color: #fff; }
+.slipt.s-lost .st-odds b { color: var(--mute); }
+.sleg.won .lst { color: var(--win); } .sleg.lost .lst { color: var(--lose); }
+.lpick .lst { margin-left: auto; font-weight: 800; }
+.lscore { color: var(--text); font-family: var(--cond); font-size: 15px; }
+.st-money .neg { color: var(--lose); }
+#mp-bets .bfoot { padding: 0 14px 8px; }
+#mp-bets .bact { padding: 0 14px 10px; }
