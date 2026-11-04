@@ -132,6 +132,11 @@ function bar(p, pick) {
   return `<div class="bar">${seg("home", "h")}${seg("draw", "d")}${seg("away", "a")}</div>`;
 }
 
+function compTag(code, withName) {
+  const c = S.data.competitions[code];
+  if (!c.logo) return `${c.flag} ${esc(c.name)}`;
+  return `<img class="clogo ${c.logo.startsWith("icons/") ? "dark" : ""}" src="${esc(c.logo)}" alt="${esc(c.name)}" title="${esc(c.name)}" onerror="this.replaceWith(document.createTextNode('${esc(c.flag + " " + c.name).replace(/'/g, "")}'))">${withName ? " " + esc(c.name) : ""}`;
+}
 const bookOf = (m) => { const want = S.book || "Betclic"; return (m.books || []).find((x) => x.book === want) || (m.books || [])[0]; };
 function oddsRow(m) {
   const f = m.final, bk = bookOf(m);
@@ -146,7 +151,7 @@ function cardHTML(m) {
   const gap = m.market && Math.abs(m.model.home - m.market.home) >= 0.08;
   const bk = bookOf(m);
   return `<article class="card" data-key="${esc(m.key)}">
-    <div class="meta"><span>${c.flag} ${esc(c.name)} · ${time}</span><span class="conf conf${m.confidence}">${confTxt}</span></div>
+    <div class="meta"><span class="cmeta">${compTag(m.comp)} · ${time}</span><span class="conf conf${m.confidence}">${confTxt}</span></div>
     <div class="vs">
       <div class="vteam">${crest(m.home.crest, m.home.name)}<span>${esc(m.home.name)}</span></div>
       <div class="vteam">${crest(m.away.crest, m.away.name)}<span>${esc(m.away.name)}</span></div>
@@ -213,7 +218,7 @@ function renderHighlights() {
     const pickTxt = m.pick === "home" ? m.home.name : m.pick === "away" ? m.away.name : "Match nul";
     return `<article class="hero" data-key="${esc(m.key)}" style="--tint:${COMP_TINT[m.comp] || "#1d2a55"}">
       ${ghost(m.home.crest, "gl")}${ghost(m.away.crest, "gr")}
-      <div class="hmeta"><span>${c.flag} ${esc(c.name)}</span><span>${dayWord(d)} · ${hhmm(d)}</span></div>
+      <div class="hmeta"><span class="cmeta">${compTag(m.comp)}</span><span>${dayWord(d)} · ${hhmm(d)}</span></div>
       <div class="hteams">
         <div class="ht">${crest(m.home.crest, m.home.name, "hcrest")}<b>${esc(m.home.name)}</b></div>
         <span class="hvs">VS</span>
@@ -242,7 +247,7 @@ function renderHighlights() {
   const podium = (top) => {
     if (top.length < 3) return `<div class="rail">${top.map(scard).join("")}</div>`;
     const col = (x, r) => `<button class="pcol r${r}" data-key="${esc(x.key)}" style="--k:${bgOf(kitOf(x.kit))}">
-        <span class="pnum">${r}</span>${playerSVG(x, kitOf(x.kit), "p" + r)}
+        <span class="pnum">${r}</span>${crest(x.crest, x.team, "pcrest")}${playerSVG(x, kitOf(x.kit), "p" + r)}
         <b class="pname">${esc(x.last || x.name)}</b><small>${esc(x.team)}</small>
         <span class="ppct">${pct(x.p)}</span><span class="pfair">${n2(x.fair)}</span></button>`;
     return `<div class="podium">${col(top[1], 2)}${col(top[0], 1)}${col(top[2], 3)}</div>`;
@@ -312,6 +317,7 @@ function playerSVG(p, kit, uid) {
     ${sleeve(pose[0], 0)}${sleeve(pose[1], 1)}
     <g clip-path="url(#${uid}t)"><rect x="40" y="80" width="120" height="140" fill="${c0}"/>${layer}<rect x="40" y="80" width="120" height="140" fill="url(#${uid}sh)"/></g>
     <path d="${torso}" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>
+    ${p.crest ? `<image href="${esc(p.crest)}" x="92" y="98" width="16" height="16" preserveAspectRatio="xMidYMid meet"/>` : ""}
     <path d="M88 90 Q100 97 112 90" fill="none" stroke="${kit.p === "plain" ? c1 : txt}" stroke-width="3" stroke-linecap="round"/>
     <text font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="${fs}" letter-spacing="1.2" fill="${txt}" stroke="${outline}" stroke-width="${kit.p === "plain" ? 0 : 2.4}" paint-order="stroke"><textPath href="#${uid}arc" startOffset="50%" text-anchor="middle">${esc(name)}</textPath></text>
     ${p.num ? `<text x="100" y="200" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="66" fill="${txt}" stroke="${outline}" stroke-width="${kit.p === "plain" ? 1.5 : 3}" paint-order="stroke">${esc(p.num)}</text>` : ""}
@@ -334,7 +340,7 @@ function openSheet(key) {
   const addBtn = (sel, lbl, p) => `<button class="add ${inC(sel)}" data-sel="${sel}">${lbl}<b>${pct(p)}</b></button>`;
 
   $("#sheet").innerHTML = `<div class="sheet-top"><span></span><div class="grab"></div><button class="close" aria-label="Fermer">×</button></div>
-    <div class="meta"><span>${c.flag} ${esc(c.name)}</span><span>${d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
+    <div class="meta"><span class="cmeta">${compTag(m.comp, true)}</span><span>${d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span></div>
     <div class="big-teams">
       <div>${crest(m.home.crest, m.home.name)}<div class="n">${esc(m.home.name)}</div><div class="elo">${m.home.elo ? "Elo " + m.home.elo : ""}</div></div>
       <div class="xgline">${dec(m.xg[0])} – ${dec(m.xg[1])}<small>buts attendus</small></div>

@@ -453,3 +453,14 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .pcol small { font-size: 11px; color: var(--mute); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ppct { font-family: var(--cond); font-weight: 700; font-size: 24px; line-height: 1.1; margin-top: 2px; }
 .pfair { background: var(--accent); color: #111; font-family: var(--cond); font-style: italic; font-weight: 700; font-size: 14px; padding: 0 7px; border-radius: 6px; }
+/* logos des compétitions sans fond blanc */
+.chip.logo, .chip.logo.on { background: var(--card); border: 1px solid var(--line); }
+.chip.logo img { filter: drop-shadow(0 0 1.5px rgba(255,255,255,.55)); }
+.chip.logo.dark img { filter: none; }
+.chip.logo.nologo { background: var(--card); color: var(--mute); }
+.cmeta { display: inline-flex; align-items: center; gap: 6px; }
+.clogo { height: 20px; width: auto; max-width: 64px; object-fit: contain; filter: drop-shadow(0 0 1.5px rgba(255,255,255,.55)); vertical-align: middle; }
+.clogo.dark { border-radius: 50%; filter: none; }
+.hmeta .clogo { height: 22px; }
+.pcrest { position: absolute; top: 4px; right: 6px; width: 26px; height: 26px; object-fit: contain; z-index: 1; }
+.pcrest.ph { display: grid; place-items: center; border-radius: 50%; background: var(--line); font-size: 11px; }
