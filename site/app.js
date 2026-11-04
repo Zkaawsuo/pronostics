@@ -217,7 +217,7 @@ function renderHighlights() {
     const c = S.data.competitions[m.comp], d = new Date(m.date);
     const pickTxt = m.pick === "home" ? m.home.name : m.pick === "away" ? m.away.name : "Match nul";
     return `<article class="hero" data-key="${esc(m.key)}" style="--tint:${COMP_TINT[m.comp] || "#1d2a55"}">
-      ${ghost(m.home.crest, "gl")}${ghost(m.away.crest, "gr")}
+      ${c.logo ? `<div class="hlogo" style="background-image:url('${esc(c.logo)}')"></div>` : ""}${ghost(m.home.crest, "gl")}${ghost(m.away.crest, "gr")}
       <div class="hmeta"><span class="cmeta">${compTag(m.comp)}</span><span>${dayWord(d)} · ${hhmm(d)}</span></div>
       <div class="hteams">
         <div class="ht">${crest(m.home.crest, m.home.name, "hcrest")}<b>${esc(m.home.name)}</b></div>

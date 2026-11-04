@@ -464,3 +464,9 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .hmeta .clogo { height: 22px; }
 .pcrest { position: absolute; top: 4px; right: 6px; width: 26px; height: 26px; object-fit: contain; z-index: 1; }
 .pcrest.ph { display: grid; place-items: center; border-radius: 50%; background: var(--line); font-size: 11px; }
+/* logo de la ligue en fondu au centre des cartes « À la une » */
+.hlogo { position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .26; filter: saturate(1.15);
+  background-repeat: no-repeat; background-position: 50% 42%; background-size: 58% auto;
+  -webkit-mask-image: radial-gradient(108px 108px at 50% 42%, #000 40%, transparent 100%);
+  mask-image: radial-gradient(108px 108px at 50% 42%, #000 40%, transparent 100%); }
+.hero .ghost { opacity: .12; }
