@@ -564,3 +564,7 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .cin input { font-size: 18px; }
 .cverdict { padding: 0 14px 10px; min-height: 4px; }
 .t-buteur { --tc: #5aa2ff; }
+.tag.val { color: #7cf0c0; border-color: #22573f; background: rgba(61,220,151,.08); }
+.advice { margin: -2px 14px 10px; font-size: 12px; color: var(--mute); }
+.advice b { color: var(--text); }
+.stake-row { flex-wrap: wrap; }

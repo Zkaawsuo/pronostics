@@ -40,6 +40,8 @@ TUNE_MIN_MATCHES = 150      # en dessous, on garde les valeurs de départ
 # quand un match approche, et on lève le pied si le quota mensuel baisse.
 ODDS_HOT_H = 30             # un match dans les 30 h = compétition "chaude"
 ODDS_HOT_REFRESH_H = 11     # compétition chaude : relevé toutes les 11 h au plus
+ODDS_SOON_H = 4             # un match dans les 4 h : relevé frais avant le coup d'envoi
+ODDS_SOON_REFRESH_H = 2.5   # ... si le dernier date de plus de 2 h 30
 ODDS_WARM_REFRESH_H = 70    # sinon : tous les ~3 jours
 ODDS_LOW_CREDITS = 40       # sous ce seuil : seulement les matchs proches, sans les +/- 2,5
 ODDS_STOP_CREDITS = 10      # sous ce seuil : plus aucun relevé

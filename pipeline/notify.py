@@ -82,6 +82,41 @@ def settled_message(tickets, formulas, url):
     return "\n".join(out)
 
 
+def value_message(vals, book, url):
+    e = html.escape
+    out = [f"<b>💎 Bonne cote chez {e(book)}</b>", "La cote paie plus que la vraie chance estimée par l'appli :", ""]
+    for v in vals[:6]:
+        out.append(f"• <b>{e(v['label'])}</b> @{_n2(v['odd'])} ({e(v['match'])}, {_when(v['date'])})")
+        out.append(f"   {round(v['p'] * 100)} % de chances · rendement estimé +{v['ev']:.0f} %".replace(".", ","))
+    out += ["", f'<a href="{e(url)}">Ouvrir l\'appli</a>', "<i>Vérifie la cote avant de jouer : elle bouge vite.</i>"]
+    return "\n".join(out)
+
+
+def weekly_message(hist, formulas, live, comps, now, url):
+    from datetime import timedelta
+    e = html.escape
+    since = (now - timedelta(days=7)).isoformat()
+    week = [t for t in hist if t.get("first", "") >= since and t["status"] in ("won", "lost")]
+    out = ["<b>📅 Bilan de la semaine</b>", ""]
+    if week:
+        for fid, fm in formulas.items():
+            ts = [t for t in week if t.get("formula") == fid]
+            if not ts:
+                continue
+            won = [t for t in ts if t["status"] == "won"]
+            roi = (sum(t.get("paid", t["odds"]) for t in won) - len(ts)) / len(ts)
+            out.append(f"{fm['emoji']} {e(fm['name'])} : {len(won)}/{len(ts)} gagnés · {roi * 100:+.0f} % pour 1 € par ticket")
+    else:
+        out.append("Aucun ticket suivi réglé cette semaine.")
+    rates = ((live or {}).get("markets") or {}).get("by_comp") or {}
+    best = sorted(((c, r["fav"]) for c, r in rates.items() if r.get("fav") and r["fav"]["n"] >= 10), key=lambda x: -x[1]["hit"])[:3]
+    if best:
+        out += ["", "<b>Où l'app vise juste (favori)</b>"]
+        out += [f"• {e(comps[c]['name'])} : {round(v['hit'] * 100)} % sur {v['n']} matchs" for c, v in best]
+    out += ["", f'<a href="{e(url)}">Ton bilan perso est dans Mes paris</a>']
+    return "\n".join(out)
+
+
 def get_updates(token, offset=None):
     """Messages reçus par le bot (24 h max chez Telegram). Renvoie (liste ou None, détail sans le jeton)."""
     params = {"timeout": 0, "allowed_updates": '["message"]'}

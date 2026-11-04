@@ -9,7 +9,7 @@ const store = {
 
 const S = { data: null, perf: null, meta: null, tickets: null, res: {}, comp: store.get("comp", "ALL"), day: "all", conf: 0,
   combo: store.get("combo", []), book: store.get("book", null), stake: store.get("stake", "5"), tcomp: store.get("tcomp", "ALL"),
-  bets: store.get("bets", []), mp: store.get("mp", "combo") };
+  bets: store.get("bets", []), mp: store.get("mp", "combo"), bank: store.get("bank", "") };
 const fmtWhen = (iso) => { const d = new Date(iso); return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
 const n2 = (x) => Number(x).toFixed(2).replace(".", ",");
 const dec = (x) => String(x).replace(".", ",");
@@ -73,6 +73,8 @@ function bindUI() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
   $("#stake-in").value = S.stake;
   $("#stake-in").addEventListener("input", (e) => { S.stake = e.target.value; store.set("stake", S.stake); renderTickets(); });
+  $("#bank-in").value = S.bank || "";
+  $("#bank-in").addEventListener("change", (e) => { S.bank = e.target.value; store.set("bank", S.bank); renderTickets(); });
   $("#mp-bets").addEventListener("click", onBetAction);
   $("#mp-stats").addEventListener("click", (e) => {
     if (e.target.id === "bets-export") exportBets();
@@ -164,6 +166,7 @@ function cardHTML(m) {
       <span class="tag">Les 2 marquent <b>${pct(f.btts)}</b></span>
       ${bk ? `<span class="tag">${esc(bk.book)}</span>` : '<span class="tag">Pas de cotes</span>'}
       ${gap ? '<span class="tag gap">Écart modèle / marché</span>' : ""}
+      ${m.bvalue ? `<span class="tag val">💎 Bonne cote ${m.bvalue.side === "home" ? "1" : m.bvalue.side === "draw" ? "N" : "2"} @${n2(m.bvalue.odd)}</span>` : ""}
     </div>
   </article>`;
 }
@@ -394,7 +397,7 @@ function openSheet(key) {
   const row = (lbl, k) => `<tr><td>${lbl}</td><td>${pct(mo[k])}</td><td>${mk ? pct(mk[k]) : "–"}</td><td class="hl">${pct(f[k])}</td></tr>`;
   const form = (t) => t.form.length ? `<div class="form">${t.form.map((x) => `<span class="fb ${x.r}" title="${esc(x.opp)}">${x.s}</span>`).join("")}</div>` : '<span class="src">–</span>';
   const xg = (t) => t.xg ? `${dec(t.xg.for)} créés · ${dec(t.xg.against)} concédés` : "–";
-  const abs = (t) => t.absences.length ? t.absences.map((a) => `${esc(a.player)}${a.doubt ? " (incertain)" : ""}`).join(", ") : "Aucune signalée";
+  const abs = (t) => t.absences.length ? t.absences.map((a) => `${esc(a.player)} <small>(${esc(a.reason || "absent")}${a.doubt && a.reason !== "incertain" ? ", incertain" : ""})</small>`).join(", ") : "Aucune signalée";
   const inC = (sel) => S.combo.some((x) => x.id === m.key + "|" + sel) ? "in" : "";
   const addBtn = (sel, lbl, p) => `<button class="add ${inC(sel)}" data-sel="${sel}">${lbl}<b>${pct(p)}</b></button>`;
 
@@ -576,6 +579,12 @@ function buteursHTML() {
     <p class="src tnote">Vérifie la compo avant de jouer : l'app ne la connaît pas.</p></section>`;
 }
 
+function advisedStake(p, odds) {
+  const bank = num(S.bank); if (!(bank > 0)) return null;
+  const k = (p * odds - 1) / (odds - 1);
+  const f = k > 0 ? Math.min(k / 4, 0.03) : 0.005;   // quart de Kelly, plafonné à 3 % ; sinon mise « plaisir » de 0,5 %
+  return { eur: Math.max(0.1, Math.round(bank * f * 10) / 10), fun: k <= 0 };
+}
 const ticketsOf = (t) => (t ? [t].concat(t.alts || []) : []);
 function formulaHTML(fid, fm, t) {
   const list = ticketsOf(t);
@@ -603,6 +612,7 @@ function ticketHTML(fid, fm, t, i = 0, n = 1) {
       <div class="st-odds"><small>Cote totale</small><b>${n2(t.odds)}</b></div>
       <div class="st-money"><span>Mise <b>${stake ? euro(stake) : "–"}</b></span><span>Gain <b class="gain">${stake ? euro(stake * t.odds) : "–"}</b></span></div>
     </div>
+    ${(() => { const a = advisedStake(t.p, t.odds); return a ? `<p class="advice">Mise conseillée : <b>${euro(a.eur)}</b>${a.fun ? " · pour le plaisir, la cote ne compense pas le risque" : " · la cote paie plus que le risque"}</p>` : ""; })()}
     <div class="st-tags"><span class="tg">${pct(t.p)} de chances</span><span class="tg ${ev >= 0 ? "pos" : "neg"}">rendement ${ev >= 0 ? "+" : ""}${ev} %</span>${t.window_h > 48 ? '<span class="tg">matchs de la semaine</span>' : ""}</div>
     <div class="st-bar" aria-hidden="true"></div>
     ${started ? '<p class="note">⚠ Un match a commencé : ticket remplacé au prochain calcul.</p>' : ""}

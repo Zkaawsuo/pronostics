@@ -326,3 +326,33 @@ def af_injuries(key, league_id, season, day):
         out.append({"team": (it.get("team") or {}).get("name", ""), "player": p.get("name", ""),
                     "type": p.get("type", ""), "reason": p.get("reason", "")})
     return out
+
+
+# ---------------------------------------------------------------- Fantasy Premier League (blessés / suspendus, PL seulement)
+FPL_STATUS = {"i": "blessé", "s": "suspendu", "u": "indisponible", "n": "indisponible", "d": "incertain"}
+
+
+def fpl_unavailable():
+    """Joueurs de Premier League absents ou incertains d'après l'appli officielle Fantasy (gratuite, publique)."""
+    r = _get("https://fantasy.premierleague.com/api/bootstrap-static/", tries=2, timeout=25)
+    if r is None or r.status_code != 200:
+        log(f"Blessés Premier League (Fantasy) indisponibles ({_peek(r)[:40]})")
+        return []
+    try:
+        data = r.json()
+    except ValueError:
+        log("Blessés Premier League : réponse illisible")
+        return []
+    teams = {t["id"]: t["name"] for t in data.get("teams", [])}
+    out = []
+    for p in data.get("elements", []):
+        st = p.get("status")
+        if st not in FPL_STATUS:
+            continue
+        chance = p.get("chance_of_playing_next_round")
+        if st == "d" and chance is not None and chance >= 75:
+            continue
+        out.append({"player": f"{p.get('first_name', '')} {p.get('second_name', '')}".strip(), "web": p.get("web_name", ""),
+                    "team": teams.get(p.get("team"), ""), "reason": FPL_STATUS[st], "news": (p.get("news") or "")[:120],
+                    "doubt": st == "d", "chance": chance})
+    return out

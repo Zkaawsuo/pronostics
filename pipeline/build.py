@@ -292,11 +292,16 @@ def scorers_for(team, lam_team, side):
     g = team_games.get(team, [])[-15:]
     avg = sum(x["gf"] for x in g) / len(g) if len(g) >= 5 else lam_team
     out = []
+    gone = {norm(x["player"]): x for x in absences.get(team, [])}
     for a in lst:
-        p = scorer_prob(a["goals"], a["matches"], lam_team / max(avg, 0.3), a["pg"], a["pm"])
+        ab = gone.get(norm(a["name"])) or next((x for k, x in gone.items() if k.split()[-1:] == norm(a["name"]).split()[-1:]), None)
+        if ab and not ab["doubt"]:
+            continue   # blessé ou suspendu : il ne marquera pas
+        p = scorer_prob(a["goals"], a["matches"], lam_team / max(avg, 0.3), a["pg"], a["pm"], avail=0.6 if ab else 1.0)
         out.append({"name": nice_name(a["name"]), "side": side, "p": r3(p), "fair": round(1 / p, 2),
                     "goals": a["goals"], "games": a["matches"], "num": a.get("number"),
-                    "last": nice_name(a.get("last") or a["name"].split()[-1]), "flag": K.flag(a.get("nat"))})
+                    "last": nice_name(a.get("last") or a["name"].split()[-1]), "flag": K.flag(a.get("nat")),
+                    "doubt": bool(ab)})
     return out
 
 
@@ -437,7 +442,12 @@ if C.ODDS_KEY:
             continue
         hot = any(dt(u["date"]) <= NOW + timedelta(hours=C.ODDS_HOT_H) for u in ups)
         age = (NOW - dt(last_by[code])).total_seconds() / 3600 if code in last_by else 1e9
-        if not ((hot and age >= C.ODDS_HOT_REFRESH_H) or age >= C.ODDS_WARM_REFRESH_H):
+        soon = any(dt(u["date"]) <= NOW + timedelta(hours=C.ODDS_SOON_H) for u in ups)
+        rem = odds_api.remaining if odds_api.remaining is not None else state.get("odds_remaining")
+        days_left = max(1, 31 - NOW.day)
+        # juste avant le coup d'envoi : relevé frais, seulement si le quota du mois le permet
+        fresh = soon and age >= C.ODDS_SOON_REFRESH_H and (rem is None or rem > days_left * 12)
+        if not (fresh or (hot and age >= C.ODDS_HOT_REFRESH_H) or age >= C.ODDS_WARM_REFRESH_H):
             continue
         rem = odds_api.remaining
         if rem is not None and rem < C.ODDS_STOP_CREDITS:
@@ -653,6 +663,27 @@ if C.AF_KEY:
                     absences[team].append({"player": it["player"], "reason": it["reason"],
                                            "doubt": w < 1, "share": round(share * w, 3)})
 
+# Premier League : blessés et suspendus de l'appli Fantasy officielle (1 fois toutes les 6 h)
+fpl = state.get("fpl") or {}
+if not fpl.get("at") or (NOW - dt(fpl["at"])).total_seconds() > 6 * 3600:
+    rows = S.fpl_unavailable()
+    if rows:
+        fpl = state["fpl"] = {"at": NOW.isoformat(), "rows": rows}
+for it in fpl.get("rows", []):
+    team = fd_team_match.find(it["team"], 0.75)
+    if not team or any(norm(x["player"]) == norm(it["player"]) for x in absences[team]):
+        continue
+    shares = player_share.get(team, {})
+    pn = norm(it["player"])
+    share = shares.get(pn)
+    if share is None:
+        last = norm(it["web"]).split()[-1:] or pn.split()[-1:]
+        cands = [v for k, v in shares.items() if k.split()[-1:] == last]
+        share = cands[0] if len(cands) == 1 else 0.0
+    w = 0.5 if it["doubt"] else 1.0
+    absences[team].append({"player": it["player"], "reason": it["reason"], "news": it["news"],
+                           "doubt": it["doubt"], "share": round(share * w, 3)})
+
 
 # ======================================================================== 10. pronostics
 def form_of(team, n=5):
@@ -864,6 +895,22 @@ for u in upcoming:
                         "o25": r3(final["over_2.5"]), "btts": r3(final["btts"]),
                         "result": history.get(key, {}).get("result")}
 
+# cotes Betclic au-dessus de la vraie chance (rare : c'est là qu'un pari rapporte en moyenne)
+value_bets = []
+for c in cards:
+    bk = next((b for b in c["books"] if b["book"] == C.TRACK_BOOK), None)
+    if not bk or not c.get("market") or any("incertain" in q for q in c["quality"]):
+        continue
+    if not (NOW < dt(c["date"]) <= NOW + timedelta(hours=36)):
+        continue
+    for side, k in (("h", "home"), ("d", "draw"), ("a", "away")):
+        ev = c["final"][k] * bk[side] - 1
+        if ev >= 0.05 and c["final"][k] >= 0.25:
+            lbl = {"home": f"{c['home']['name']} gagne", "draw": "Match nul", "away": f"{c['away']['name']} gagne"}[k]
+            c["bvalue"] = {"side": k, "ev": round(ev * 100, 1), "odd": bk[side]}
+            value_bets.append({"key": c["key"], "label": lbl, "match": f"{c['home']['name']} – {c['away']['name']}",
+                               "date": c["date"], "odd": bk[side], "p": r3(c["final"][k]), "ev": round(ev * 100, 1)})
+
 # ======================================================================== 11. tickets
 tk = T.build_all(cards, NOW)
 track_book = tk["books"][0] if tk["books"] else None
@@ -931,6 +978,18 @@ elif C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
             state["telegram_day"] = today
         else:
             S.log(f"Telegram : message non envoyé ({detail}). As-tu bien écrit /start à ton bot ?")
+    sent = state.setdefault("value_sent", [])
+    fresh_vals = [v for v in value_bets if v["key"] + v["label"] not in sent]
+    if fresh_vals and not first:
+        ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.value_message(fresh_vals, C.TRACK_BOOK, url))
+        if ok:
+            sent += [v["key"] + v["label"] for v in fresh_vals]
+            del sent[:-300]
+    week = paris.strftime("%G-%V")
+    if paris.weekday() == 0 and paris.hour >= 8 and state.get("weekly_sent") != week and not first:
+        ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.weekly_message(tk_hist, T.FORMULAS, live, C.COMPETITIONS, NOW, url))
+        if ok:
+            state["weekly_sent"] = week
     if just_settled and not first:
         ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.settled_message(just_settled, T.FORMULAS, url))
         if not ok:

@@ -3,7 +3,7 @@ name: Mise à jour des pronos
 on:
   schedule:
     # heures UTC (Paris = UTC+1 l'hiver, +2 l'été) : ~7h, 12h, 16h, 19h à Paris
-    - cron: "23 6,11,15,18 * * *"
+    - cron: "23 6,11,13,15,16,17,18,19 * * *"
   workflow_dispatch: {}   # bouton "Run workflow" pour lancer à la main
   push:
     branches: [main]
