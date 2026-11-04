@@ -28,6 +28,7 @@ async function getJSON(path) {
 
 async function init() {
   bindUI();
+  $("#slipbar").onclick = () => { document.querySelector(".tabs button[data-view='combo']").click(); S.mp = "combo"; renderMP(); };
   $("#match-list").innerHTML = '<div class="skeleton"></div>'.repeat(4);
   let res = null;
   try {
@@ -127,7 +128,7 @@ function renderMatches() {
     html += cardHTML(m);
   }
   $("#match-list").innerHTML = staleBanner() + html + disclaimer();
-  $("#match-list").onclick = (e) => { const c = e.target.closest(".card"); if (c) openSheet(c.dataset.key); };
+  $("#match-list").onclick = (e) => { if (pickOdd(e)) return; const c = e.target.closest(".card"); if (c) openSheet(c.dataset.key); };
 }
 
 function bar(p, pick) {
@@ -143,7 +144,8 @@ function compTag(code, withName) {
 const bookOf = (m) => { const want = S.book || "Betclic"; return (m.books || []).find((x) => x.book === want) || (m.books || [])[0]; };
 function oddsRow(m) {
   const f = m.final, bk = bookOf(m);
-  const btn = (k, lbl, side) => `<div class="ob ${m.pick === k ? "pick" : ""}"><span class="ol">${lbl}</span><b>${bk && bk[side] ? n2(bk[side]) : "–"}</b><small>${pct(f[k])}</small></div>`;
+  const inC = (k) => (S.combo.some((x) => x.id === m.key + "|" + k) ? "in" : "");
+  const btn = (k, lbl, side) => `<button class="ob ${m.pick === k ? "pick" : ""} ${inC(k)}" data-key="${esc(m.key)}" data-sel="${k}" aria-label="Ajouter ${lbl} au combiné"><span class="ol">${lbl}</span><b>${bk && bk[side] ? n2(bk[side]) : "–"}</b><small>${pct(f[k])}</small></button>`;
   return `<div class="odds">${btn("home", "1", "h")}${btn("draw", "N", "d")}${btn("away", "2", "a")}</div>`;
 }
 
@@ -169,6 +171,26 @@ function cardHTML(m) {
       ${m.bvalue ? `<span class="tag val">💎 Bonne cote ${m.bvalue.side === "home" ? "1" : m.bvalue.side === "draw" ? "N" : "2"} @${n2(m.bvalue.odd)}</span>` : ""}
     </div>
   </article>`;
+}
+
+// ------------------------------------------------------------------ toucher une cote = l'ajouter à son combiné
+function pickOdd(e) {
+  const ob = e.target.closest(".ob[data-sel]"); if (!ob) return false;
+  const m = S.data.matches.find((x) => x.key === ob.dataset.key); if (!m) return true;
+  toggleCombo(m, ob.dataset.sel);
+  const on = S.combo.some((x) => x.id === m.key + "|" + ob.dataset.sel);
+  document.querySelectorAll(`.ob[data-key="${CSS.escape(m.key)}"]`).forEach((b) => b.classList.toggle("in", on && b.dataset.sel === ob.dataset.sel));
+  toast(on ? "Ajouté à ton combiné" : "Retiré du combiné");
+  return true;
+}
+function renderSlipBar() {
+  const bar = $("#slipbar"); if (!bar || !S.data) return;
+  const live = S.combo.map((s) => ({ ...s, m: S.data.matches.find((x) => x.key === s.key) })).filter((s) => s.m);
+  if (!live.length) { bar.classList.remove("on"); return; }
+  const odds = live.map((s) => selOdd(s.m, s.sel));
+  const tot = odds.every((o) => o) ? odds.reduce((a, o) => a * o, 1) : null;
+  bar.innerHTML = `<span>🧾 Mon combiné · <b>${live.length}</b> sélection${live.length > 1 ? "s" : ""}${tot ? ` · cote <b>${n2(tot)}</b>` : ""}</span><b class="go">Voir ›</b>`;
+  bar.classList.add("on");
 }
 
 // ------------------------------------------------------------------ à la une
@@ -259,7 +281,7 @@ function renderHighlights() {
   el.innerHTML = (tops.length ? `<div class="hl-head"><h3>À la une</h3></div><div class="rail">${tops.map(hero).join("")}</div>` : "") +
     (sc.length ? `<div class="hl-head"><h3>Top buteurs</h3><span>chance de marquer, s'il joue</span></div>${podium(sc.slice(0, 3))}
       ${sc.length > 3 ? `<div class="rail">${sc.slice(3).map((x, i) => scard(x, i + 3)).join("")}</div>` : ""}` : "");
-  el.onclick = (e) => { const c = e.target.closest("[data-key]"); if (c) openSheet(c.dataset.key); };
+  el.onclick = (e) => { if (pickOdd(e)) return; const c = e.target.closest("[data-key]"); if (c) openSheet(c.dataset.key); };
 }
 
 // ------------------------------------------------------------------ silhouettes de buteurs (maillot, nom, numéro : aucun trait physique)
@@ -695,6 +717,7 @@ function selOdd(m, sel) {   // cote du bookmaker choisi quand on l'a (pas pour �
 }
 
 function renderCombo() {
+  renderSlipBar();
   const live = S.combo.map((s) => ({ ...s, m: S.data && S.data.matches.find((x) => x.key === s.key) })).filter((s) => s.m);
   if (S.data && live.length !== S.combo.length) { S.combo = live.map(({ m, ...s }) => s); store.set("combo", S.combo); }
   const badge = $("#combo-badge"); badge.textContent = live.length; badge.classList.toggle("on", live.length > 0);
@@ -748,9 +771,10 @@ const SEL_TYPE = { home: "Victoire d'une équipe", away: "Victoire d'une équipe
   N2: "Double chance", "12": "Double chance", over: "Plus de 2,5 buts", under: "Moins de 2,5 buts", btts: "Les 2 équipes marquent" };
 function srcName(src) {
   const fm = S.tickets && S.tickets.formulas && S.tickets.formulas[src];
-  return fm ? `${fm.emoji} Ticket ${fm.name}` : src === "combine" ? "🧩 Mon combiné" : "Pari";
+  return fm ? `${fm.emoji} Ticket ${fm.name}` : src === "combine" ? "🧩 Mon combiné" : src === "manuel" ? "✍️ Mon pari" : "Pari";
 }
 function legState(l) {
+  if (l.sel === "manual") return "wait";   // pari saisi à la main : tu le règles avec ⋯
   const r = S.res[l.key];
   if (r && r[0] != null) return LEG_WON[l.sel] && LEG_WON[l.sel](r[0], r[1]) ? "won" : "lost";
   if (Date.now() - new Date(l.date) > 4 * 864e5) return "void";   // match reporté ou score introuvable
@@ -814,7 +838,8 @@ function renderMP() {
 }
 
 function betsHTML() {
-  if (!S.bets.length) return `<p class="empty">Aucun pari enregistré.<br>Touche « Je l'ai joué » sous un ticket ou dans ton combiné : le résultat et ton bilan se mettront à jour tout seuls.</p>`;
+  const add = `<button class="cta" id="bet-manual">+ Ajouter un pari fait sur Betclic</button>`;
+  if (!S.bets.length) return add + `<p class="empty">Aucun pari enregistré.<br>Touche « Je l'ai joué » sous un ticket ou dans ton combiné : le résultat et ton bilan se mettront à jour tout seuls.</p>`;
   const list = S.bets.map((b) => ({ b, st: betState(b) }))
     .sort((x, y) => ((x.st === "wait") === (y.st === "wait") ? (x.b.at < y.b.at ? 1 : -1) : x.st === "wait" ? -1 : 1));
   let html = "", head = "";
@@ -823,7 +848,7 @@ function betsHTML() {
     if (h !== head) { head = h; html += `<div class="day">${h}</div>`; }
     html += betCard(b, st);
   }
-  return html + `<p class="src" style="margin-top:10px">Un match reporté (sans score après 4 jours) compte comme remboursé. Si ton bookmaker a réglé autrement (cash out, règle spéciale), corrige avec ⋯.</p>`;
+  return add + html + `<p class="src" style="margin-top:10px">Un match reporté (sans score après 4 jours) compte comme remboursé. Si ton bookmaker a réglé autrement (cash out, règle spéciale), corrige avec ⋯.</p>`;
 }
 
 function betCard(b, st) {
@@ -854,7 +879,48 @@ function betCard(b, st) {
   </article>`;
 }
 
+function openManualBet() {
+  const opts = S.data ? S.data.matches.filter((m) => new Date(m.date) > Date.now() - 3 * 3600e3)
+    .map((m) => `<option value="${esc(m.key)}">${esc(m.home.name)} – ${esc(m.away.name)}</option>`).join("") : "";
+  $("#sheet").innerHTML = `<div class="sheet-top"><span></span><div class="grab"></div><button class="close" aria-label="Fermer">×</button></div>
+    <h2 class="title">Ajouter mon pari</h2>
+    <p class="src">Pour un pari fait directement sur Betclic. Ajoute une ligne par sélection.</p>
+    <div id="mlegs"></div>
+    <button class="btn" id="mleg-add">+ Une sélection</button>
+    <div class="bf-grid" style="margin-top:12px">
+      <label class="input"><span class="src">Mise</span><input id="m-stake" inputmode="decimal" value="${esc(S.stake)}"><span class="src">€</span></label>
+      <label class="input"><span class="src">Cote totale</span><input id="m-odds" inputmode="decimal" placeholder="ex : 4,20"></label>
+    </div>
+    <button class="cta" id="m-save">Enregistrer</button>
+    <p class="src" style="margin-top:10px">Si tu choisis le match et le type de pari, le résultat se règle tout seul. Sinon (buteur, MyCombi…), règle-le avec ⋯ après le match.</p>`;
+  const row = () => `<div class="mleg"><select class="m-match"><option value="">Autre match / pari libre</option>${opts}</select>
+    <select class="m-sel"><option value="home">Victoire domicile</option><option value="draw">Nul</option><option value="away">Victoire extérieur</option>
+      <option value="1N">1N</option><option value="N2">N2</option><option value="12">12</option><option value="over">+2,5 buts</option><option value="under">−2,5 buts</option>
+      <option value="btts">Les 2 marquent</option><option value="manual">Autre (buteur, MyCombi…)</option></select>
+    <input class="m-label" placeholder="Détail (ex : Mbappé buteur)"></div>`;
+  $("#mlegs").innerHTML = row();
+  $("#sheet").onclick = (e) => {
+    if (e.target.closest(".close")) { closeSheet(); return; }
+    if (e.target.id === "mleg-add") { $("#mlegs").insertAdjacentHTML("beforeend", row()); return; }
+    if (e.target.id !== "m-save") return;
+    const legs = [...$("#mlegs").querySelectorAll(".mleg")].map((r) => {
+      const key = r.querySelector(".m-match").value, sel = r.querySelector(".m-sel").value, txt = r.querySelector(".m-label").value.trim();
+      const m = key && S.data.matches.find((x) => x.key === key);
+      if (!m) return txt ? { key: "manual", comp: "", date: new Date().toISOString(), match: txt, hc: "", ac: "", sel: "manual", label: txt, odd: null } : null;
+      const label = sel === "manual" ? (txt || "Pari libre") : { home: `${m.home.name} gagne`, draw: "Match nul", away: `${m.away.name} gagne`, "1N": `${m.home.name} ou nul`,
+        N2: `Nul ou ${m.away.name}`, "12": "Pas de nul", over: "Plus de 2,5 buts", under: "Moins de 2,5 buts", btts: "Les 2 équipes marquent" }[sel];
+      return { key: m.key, comp: m.comp, date: m.date, match: `${m.home.name} – ${m.away.name}`, hc: m.home.crest || "", ac: m.away.crest || "", sel, label, odd: null };
+    }).filter(Boolean);
+    const stake = num($("#m-stake").value), odds = num($("#m-odds").value);
+    if (!legs.length || !(stake > 0) || !(odds > 1)) { toast("Ajoute au moins une sélection, la mise et la cote"); return; }
+    S.bets.unshift({ id: "b" + Date.now().toString(36), at: new Date().toISOString(), src: "manuel", book: "Betclic", stake, odds, legs });
+    saveBets(); closeSheet(); toast("Pari ajouté"); S.mp = "bets"; renderMP();
+  };
+  showSheet();
+}
+
 function onBetAction(e) {
+  if (e.target.id === "bet-manual") { openManualBet(); return; }
   const btn = e.target.closest("[data-act]"); if (!btn) return;
   const card = btn.closest(".bet"), b = S.bets.find((x) => x.id === card.dataset.id); if (!b) return;
   const act = btn.dataset.act;

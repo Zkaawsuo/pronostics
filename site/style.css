@@ -580,3 +580,17 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .st-money .neg { color: var(--lose); }
 #mp-bets .bfoot { padding: 0 14px 8px; }
 #mp-bets .bact { padding: 0 14px 10px; }
+/* cotes cliquables + barre du combiné */
+button.ob { font: inherit; color: inherit; width: 100%; cursor: pointer; }
+.ob.in { background: var(--accent) !important; border-color: var(--accent) !important; }
+.ob.in b, .ob.in small, .ob.in .ol { color: #111 !important; }
+.slipbar { position: fixed; left: 12px; right: 12px; bottom: calc(70px + var(--safe-b)); z-index: 9; display: none; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-radius: 14px; background: var(--accent); color: #111; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.45); animation: slipIn .3s both; }
+.slipbar.on { display: flex; }
+.slipbar .go { font-family: var(--cond); font-size: 18px; }
+@media (min-width: 980px) { .slipbar { left: auto; right: 24px; width: 360px; bottom: 24px; } }
+.mleg { display: grid; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 10px 0 0; }
+.mleg select, .mleg input { width: 100%; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font: inherit; font-size: 14px; }
+#mp-bets > .cta { margin: 0 0 14px; }
+.toast { bottom: calc(140px + var(--safe-b)); }
+#view-combo.active ~ .slipbar { display: none; }
