@@ -293,13 +293,18 @@ function playerSVG(p, kit, uid) {   // maillot vu de face : couleurs, motif, éc
   return `<svg class="ssil" viewBox="0 0 200 214" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
     <defs><clipPath id="${uid}t"><path d="${shirt}"/></clipPath>
       <radialGradient id="${uid}hl" cx=".42" cy=".3" r=".75"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000" stop-opacity=".35"/></radialGradient></defs>
-    <g clip-path="url(#${uid}t)"><rect width="200" height="214" fill="${c0}"/>${layer}
+      <stop offset="1" stop-color="#000" stop-opacity=".35"/></radialGradient>
+    <linearGradient id="${uid}fd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c0}"/><stop offset=".45" stop-color="${c0}"/>
+      <stop offset="1" stop-color="${shade(c0, lum(c0) > 0.6 ? -0.12 : 0.38)}"/></linearGradient></defs>
+    <g clip-path="url(#${uid}t)"><rect width="200" height="214" fill="url(#${uid}fd)"/>${layer}
+      <path d="M58 96 L66 200 L58 200 Z M142 96 L134 200 L142 200 Z" fill="${shade(c0, 0.3)}" opacity=".55"/>
+      <text x="100" y="128" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-style="italic" font-weight="800" font-size="30"
+        fill="${trim}" opacity=".92" letter-spacing="1">BETI<tspan fill="${lum(c0) > 0.45 || [c0, c1].some((c) => /^#f[cdef]/i.test(c)) ? trim : "#ffd60a"}">X</tspan></text>
       <path d="M100 46 L100 214" stroke="#000" stroke-opacity=".08" stroke-width="2"/>
       <path d="M58 92 Q70 150 62 200 M142 92 Q130 150 138 200" stroke="#000" stroke-opacity=".12" stroke-width="3" fill="none"/>
       <rect width="200" height="214" fill="url(#${uid}hl)"/></g>
     <path d="${shirt}" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>
-    <path d="M72 22 Q100 46 128 22" fill="none" stroke="${trim}" stroke-width="6" stroke-linecap="round"/>
+    <path d="M72 22 Q100 46 128 22" fill="none" stroke="${trim}" stroke-width="7" stroke-linecap="round"/><path d="M76 24 Q100 42 124 24" fill="none" stroke="#000" stroke-opacity=".15" stroke-width="1.5"/>
     <path d="M17 62 L33 92 M183 62 L167 92" stroke="${trim}" stroke-width="5" stroke-linecap="round"/>
     ${p.crest ? `<image href="${esc(p.crest)}" x="114" y="56" width="26" height="26" preserveAspectRatio="xMidYMid meet"/>` : ""}
     ${p.num ? `<text x="78" y="78" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="20" fill="${trim}">${esc(p.num)}</text>` : ""}
