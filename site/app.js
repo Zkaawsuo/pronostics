@@ -275,53 +275,34 @@ const POSES = [   // épaule, coude, main : bras levés, un bras au ciel, avion
   [[[62, 106], [32, 98], [8, 86]], [[138, 106], [168, 98], [192, 86]]],
 ];
 function hashStr(s) { let h = 7; for (const ch of String(s)) h = (h * 31 + ch.codePointAt(0)) >>> 0; return h; }
-function playerSVG(p, kit, uid) {
-  const [c0, c1, c2] = kit.c, body = "#0b0f1f";
-  const ink = lum(c0) > 0.45 ? shade(c0, -0.6) : shade(c0, -0.55);
-  const txt = kit.p === "plain" || kit.p === "sleeves" || kit.p === "chest" ? (lum(c0) > 0.45 ? (lum(c1) < 0.3 ? c1 : "#15151a") : (lum(c1) > 0.5 ? c1 : "#ffffff"))
-    : (lum(c0) + lum(c1) > 0.9 ? "#15151a" : "#ffffff");
-  const outline = lum(txt) > 0.5 ? "#15151a" : "#ffffff";
-  const pose = POSES[hashStr(p.name) % POSES.length];
-  const torso = "M62 94 Q100 84 138 94 L144 130 Q148 172 142 214 L58 214 Q52 172 56 130 Z";
+function playerSVG(p, kit, uid) {   // maillot vu de face : couleurs, motif, écusson côté cœur
+  const [c0, c1, c2] = kit.c;
+  const ink = shade(c0, lum(c0) > 0.45 ? -0.55 : -0.5);
+  const shirt = "M72 22 L54 28 L14 54 L30 98 L56 86 L58 200 Q100 210 142 200 L144 86 L170 98 L186 54 L146 28 L128 22 Q100 46 72 22 Z";
   const layer = {
-    plain: "",
-    stripes: [70, 94, 118, 142].map((x) => `<rect x="${x}" y="80" width="12" height="140" fill="${c1}"/>`).join(""),
-    hoops: [104, 134, 164, 194].map((y) => `<rect x="40" y="${y}" width="120" height="15" fill="${c1}"/>`).join(""),
-    halves: `<rect x="100" y="80" width="60" height="140" fill="${c1}"/>`,
-    diag: `<polygon points="40,220 160,80 160,220" fill="${c1}"/>`,
-    band: `<rect x="84" y="80" width="32" height="140" fill="${c2}"/><rect x="89" y="80" width="22" height="140" fill="${c1}"/>`,
-    sash: `<polygon points="52,96 70,90 150,200 132,214" fill="${c1}"/>`,
-    chest: `<rect x="40" y="110" width="120" height="18" fill="${c1}"/>`,
-    sleeves: "",
+    stripes: [66, 90, 114, 138, 162].map((x) => `<rect x="${x - 6}" y="0" width="12" height="214" fill="${c1}"/>`).join(""),
+    hoops: [70, 102, 134, 166, 198].map((y) => `<rect x="0" y="${y}" width="200" height="16" fill="${c1}"/>`).join(""),
+    halves: `<rect x="100" y="0" width="100" height="214" fill="${c1}"/>`,
+    diag: `<polygon points="0,214 200,40 200,214" fill="${c1}"/>`,
+    band: `<rect x="82" y="0" width="36" height="214" fill="${c2}"/><rect x="88" y="0" width="24" height="214" fill="${c1}"/>`,
+    sash: `<polygon points="60,30 82,24 166,200 140,208" fill="${c1}"/>`,
+    chest: `<rect x="0" y="92" width="200" height="22" fill="${c1}"/>`,
+    sleeves: `<polygon points="0,0 60,0 56,214 0,214" fill="${c1}"/><polygon points="144,0 200,0 200,214 144,214" fill="${c1}"/>`,
   }[kit.p] || "";
-  const sleeveCol = (side) => (kit.p === "sleeves" ? c1 : kit.p === "halves" && side ? c1 : c0);
-  const sleeve = ([s, e], side) => {
-    const dx = e[0] - s[0], dy = e[1] - s[1], L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, px = -uy, py = ux;
-    const m = [s[0] + ux * L * 0.5, s[1] + uy * L * 0.5];
-    const pts = [[s[0] + px * 15 - ux * 6, s[1] + py * 15 - uy * 6], [m[0] + px * 12, m[1] + py * 12], [m[0] - px * 12, m[1] - py * 12], [s[0] - px * 15 - ux * 6, s[1] - py * 15 - uy * 6]];
-    return `<polygon points="${pts.map((q) => q.map((v) => v.toFixed(1)).join(",")).join(" ")}" fill="${sleeveCol(side)}" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>`;
-  };
-  const arm = (a) => `<path d="M${a[0]} L${a[1]} L${a[2]}" fill="none" stroke="${body}" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${a[2][0]}" cy="${a[2][1]}" r="10.5" fill="${body}"/>`;
-  const name = (p.last || p.name.split(" ").slice(-1)[0] || "").toUpperCase();
-  const fs = name.length <= 7 ? 15 : name.length <= 10 ? 13 : 11;
-  const fl = pose[0];
-  const fx = fl[0][0] + (fl[1][0] - fl[0][0]) * 0.3, fy = fl[0][1] + (fl[1][1] - fl[0][1]) * 0.3;
+  const trim = kit.p === "plain" ? c1 : kit.p === "sleeves" ? c0 : (lum(c0) + lum(c1) > 0.9 ? "#15151a" : "#ffffff");
   return `<svg class="ssil" viewBox="0 0 200 214" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
-    <defs><clipPath id="${uid}t"><path d="${torso}"/></clipPath>
-      <linearGradient id="${uid}sh" x1="0" x2="1"><stop offset="0" stop-color="#000" stop-opacity=".3"/><stop offset=".35" stop-color="#000" stop-opacity="0"/>
-      <stop offset=".7" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".32"/></linearGradient>
-      <path id="${uid}arc" d="M64 132 Q100 119 136 132"/></defs>
-    ${arm(pose[0])}${arm(pose[1])}
-    <ellipse cx="100" cy="60" rx="21" ry="25" fill="${body}" stroke="rgba(255,255,255,.28)" stroke-width="1.5"/>
-    <rect x="90" y="76" width="20" height="20" fill="${body}"/>
-    ${sleeve(pose[0], 0)}${sleeve(pose[1], 1)}
-    <g clip-path="url(#${uid}t)"><rect x="40" y="80" width="120" height="140" fill="${c0}"/>${layer}<rect x="40" y="80" width="120" height="140" fill="url(#${uid}sh)"/></g>
-    <path d="${torso}" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>
-    ${p.crest ? `<image href="${esc(p.crest)}" x="92" y="98" width="16" height="16" preserveAspectRatio="xMidYMid meet"/>` : ""}
-    <path d="M88 90 Q100 97 112 90" fill="none" stroke="${kit.p === "plain" ? c1 : txt}" stroke-width="3" stroke-linecap="round"/>
-    <text font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="${fs}" letter-spacing="1.2" fill="${txt}" stroke="${outline}" stroke-width="${kit.p === "plain" ? 0 : 2.4}" paint-order="stroke"><textPath href="#${uid}arc" startOffset="50%" text-anchor="middle">${esc(name)}</textPath></text>
-    ${p.num ? `<text x="100" y="200" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="66" fill="${txt}" stroke="${outline}" stroke-width="${kit.p === "plain" ? 1.5 : 3}" paint-order="stroke">${esc(p.num)}</text>` : ""}
-    ${p.flag ? `<text x="${fx.toFixed(0)}" y="${(fy + 5).toFixed(0)}" font-size="13" text-anchor="middle">${p.flag}</text>` : ""}
+    <defs><clipPath id="${uid}t"><path d="${shirt}"/></clipPath>
+      <radialGradient id="${uid}hl" cx=".42" cy=".3" r=".75"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".35"/></radialGradient></defs>
+    <g clip-path="url(#${uid}t)"><rect width="200" height="214" fill="${c0}"/>${layer}
+      <path d="M100 46 L100 214" stroke="#000" stroke-opacity=".08" stroke-width="2"/>
+      <path d="M58 92 Q70 150 62 200 M142 92 Q130 150 138 200" stroke="#000" stroke-opacity=".12" stroke-width="3" fill="none"/>
+      <rect width="200" height="214" fill="url(#${uid}hl)"/></g>
+    <path d="${shirt}" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M72 22 Q100 46 128 22" fill="none" stroke="${trim}" stroke-width="6" stroke-linecap="round"/>
+    <path d="M17 62 L33 92 M183 62 L167 92" stroke="${trim}" stroke-width="5" stroke-linecap="round"/>
+    ${p.crest ? `<image href="${esc(p.crest)}" x="114" y="56" width="26" height="26" preserveAspectRatio="xMidYMid meet"/>` : ""}
+    ${p.num ? `<text x="78" y="78" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="20" fill="${trim}">${esc(p.num)}</text>` : ""}
   </svg>`;
 }
 

@@ -166,7 +166,7 @@ emblems = state.setdefault("emblems", {})
 for code, comp in C.COMPETITIONS.items():
     if comp["fd"] and fd.emblems.get(comp["fd"]):
         emblems[code] = fd.emblems[comp["fd"]]
-emblems.update({"EL": "icons/comp-EL.png", "ECL": "icons/comp-ECL.png"})
+emblems.update({c: f"icons/comp-{c}.png" for c in ("EL", "ECL", "PL", "FL1", "CL")})   # images envoyées par Lucas
 
 # couleurs des clubs pour dessiner les maillots (1 fois par semaine, 6 requêtes)
 teams_state = state.get("teams") or {}
