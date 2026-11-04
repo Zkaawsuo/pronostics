@@ -7,12 +7,17 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 
-const S = { data: null, perf: null, meta: null, tickets: null, comp: store.get("comp", "ALL"), day: "all", conf: 0,
-  combo: store.get("combo", []), book: store.get("book", null), stake: store.get("stake", "5"), tcomp: store.get("tcomp", "ALL") };
+const S = { data: null, perf: null, meta: null, tickets: null, res: {}, comp: store.get("comp", "ALL"), day: "all", conf: 0,
+  combo: store.get("combo", []), book: store.get("book", null), stake: store.get("stake", "5"), tcomp: store.get("tcomp", "ALL"),
+  bets: store.get("bets", []), mp: store.get("mp", "combo") };
 const fmtWhen = (iso) => { const d = new Date(iso); return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
 const n2 = (x) => Number(x).toFixed(2).replace(".", ",");
 const dec = (x) => String(x).replace(".", ",");
+const num = (s) => parseFloat(String(s ?? "").replace(",", "."));
 const euro = (x) => x.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const hhmm = (d) => d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const flagOf = (c) => (S.data && S.data.competitions[c] ? S.data.competitions[c].flag : "");
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), 1800); }
 
 async function getJSON(path) {
@@ -24,16 +29,20 @@ async function getJSON(path) {
 async function init() {
   bindUI();
   $("#match-list").innerHTML = '<div class="skeleton"></div>'.repeat(4);
+  let res = null;
   try {
-    [S.data, S.perf, S.meta, S.tickets] = await Promise.all([getJSON("data/matches.json"), getJSON("data/performance.json"),
-      getJSON("data/meta.json").catch(() => null), getJSON("data/tickets.json").catch(() => null)]);
+    [S.data, S.perf, S.meta, S.tickets, res] = await Promise.all([getJSON("data/matches.json"), getJSON("data/performance.json"),
+      getJSON("data/meta.json").catch(() => null), getJSON("data/tickets.json").catch(() => null),
+      getJSON("data/results.json").catch(() => null)]);
   } catch {
     $("#match-list").innerHTML = '<p class="empty">Pas encore de données. Le premier calcul automatique arrive dans quelques minutes.</p>';
     $("#updated").textContent = "En attente";
+    renderMP();
     return;
   }
+  S.res = (res && res.results) || {};
   $("#updated").textContent = "Mis à jour " + relTime(S.data.generated);
-  renderChips(); renderMatches(); renderTickets(); renderCombo(); renderPerf();
+  renderChips(); renderHighlights(); renderMatches(); renderTickets(); renderMP(); renderPerf();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
@@ -63,6 +72,11 @@ function bindUI() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
   $("#stake-in").value = S.stake;
   $("#stake-in").addEventListener("input", (e) => { S.stake = e.target.value; store.set("stake", S.stake); renderTickets(); });
+  $("#mp-bets").addEventListener("click", onBetAction);
+  $("#mp-stats").addEventListener("click", (e) => {
+    if (e.target.id === "bets-export") exportBets();
+    if (e.target.id === "bets-import") importBets();
+  });
 }
 
 // ------------------------------------------------------------------ liste
@@ -74,7 +88,7 @@ function renderChips() {
   $("#comp-chips").innerHTML = items.map(([k, l]) => `<button class="chip ${S.comp === k ? "on" : ""}" data-k="${k}">${esc(l)}</button>`).join("");
   $("#comp-chips").onclick = (e) => {
     const b = e.target.closest(".chip"); if (!b) return;
-    S.comp = b.dataset.k; store.set("comp", S.comp); renderChips(); renderMatches();
+    S.comp = b.dataset.k; store.set("comp", S.comp); renderChips(); renderHighlights(); renderMatches();
   };
 }
 
@@ -111,14 +125,19 @@ function bar(p, pick) {
   return `<div class="bar">${seg("home", "h")}${seg("draw", "d")}${seg("away", "a")}</div>`;
 }
 
+const bookOf = (m) => { const want = S.book || "Betclic"; return (m.books || []).find((x) => x.book === want) || (m.books || [])[0]; };
+function oddsRow(m) {
+  const f = m.final, bk = bookOf(m);
+  const btn = (k, lbl, side) => `<div class="ob ${m.pick === k ? "pick" : ""}"><span class="ol">${lbl}</span><b>${bk && bk[side] ? n2(bk[side]) : "–"}</b><small>${pct(f[k])}</small></div>`;
+  return `<div class="odds">${btn("home", "1", "h")}${btn("draw", "N", "d")}${btn("away", "2", "a")}</div>`;
+}
+
 function cardHTML(m) {
   const c = S.data.competitions[m.comp], f = m.final;
-  const time = new Date(m.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const time = hhmm(new Date(m.date));
   const confTxt = ["", "Incertain", "Moyen", "Fort"][m.confidence];
   const gap = m.market && Math.abs(m.model.home - m.market.home) >= 0.08;
-  const want = S.book || "Betclic";
-  const bk = (m.books || []).find((x) => x.book === want) || (m.books || [])[0];
-  const btn = (k, lbl, side) => `<div class="ob ${m.pick === k ? "pick" : ""}"><span class="ol">${lbl}</span><b>${bk && bk[side] ? n2(bk[side]) : "–"}</b><small>${pct(f[k])}</small></div>`;
+  const bk = bookOf(m);
   return `<article class="card" data-key="${esc(m.key)}">
     <div class="meta"><span>${c.flag} ${esc(c.name)} · ${time}</span><span class="conf conf${m.confidence}">${confTxt}</span></div>
     <div class="vs">
@@ -126,7 +145,7 @@ function cardHTML(m) {
       <div class="vteam">${crest(m.away.crest, m.away.name)}<span>${esc(m.away.name)}</span></div>
       <div class="vscore"><b>${esc((m.pick_score || m.scores[0]).score)}</b><small>score prono</small></div>
     </div>
-    <div class="odds">${btn("home", "1", "h")}${btn("draw", "N", "d")}${btn("away", "2", "a")}</div>
+    ${oddsRow(m)}
     <div class="tags">
       <span class="tag">+2,5 <b>${pct(f["over_2.5"])}</b></span>
       <span class="tag">Les 2 marquent <b>${pct(f.btts)}</b></span>
@@ -136,7 +155,87 @@ function cardHTML(m) {
   </article>`;
 }
 
+// ------------------------------------------------------------------ à la une
+const COMP_TINT = { PL: "#3b1f6b", PD: "#7a2a1c", SA: "#173f7a", BL1: "#6e1a26", FL1: "#1c3570", CL: "#10307a", EL: "#6b3f0e", ECL: "#0f5236" };
+const ghost = (u, cls) => (u ? `<img class="ghost ${cls}" src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : "");
+function dayWord(d) {
+  const k = dayKey(d);
+  if (k === dayKey(new Date())) return "Aujourd'hui";
+  if (k === dayKey(new Date(Date.now() + 864e5))) return "Demain";
+  if (d - Date.now() > 6 * 864e5) return cap(d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }));
+  return cap(d.toLocaleDateString("fr-FR", { weekday: "long" }));
+}
+
+function topMatches() {
+  const now = Date.now(), elo = (t) => t.elo || 1450;
+  let pool = S.data.matches.filter((m) => (S.comp === "ALL" || m.comp === S.comp) && new Date(m.date) > now);
+  const soon = pool.filter((m) => new Date(m.date) - now < 36 * 3600e3);
+  if (soon.length >= 2) pool = soon;
+  // les plus belles affiches : deux grosses équipes, plutôt proches, bonus Ligue des champions
+  const score = (m) => elo(m.home) + elo(m.away) - 0.5 * Math.abs(elo(m.home) - elo(m.away)) + (m.comp === "CL" ? 80 : 0);
+  return pool.slice().sort((a, b) => score(b) - score(a)).slice(0, 4);
+}
+
+function topScorers() {
+  const now = Date.now();
+  let out = [];
+  for (const h of [72, 24 * 9, Infinity]) {
+    out = [];
+    for (const m of S.data.matches) {
+      const t = new Date(m.date) - now;
+      if ((S.comp !== "ALL" && m.comp !== S.comp) || t < 0 || t > h * 3600e3) continue;
+      const seen = new Set();
+      for (const s of m.scorers || []) {   // le meilleur de chaque équipe
+        if (seen.has(s.side)) continue;
+        seen.add(s.side);
+        const opp = s.side === "home" ? m.away : m.home;
+        out.push({ ...s, key: m.key, date: m.date, team: m[s.side].name, crest: m[s.side].crest, opp: opp.name });
+      }
+    }
+    if (out.length >= 3) break;
+  }
+  return out.sort((a, b) => b.p - a.p).slice(0, 8);
+}
+
+function renderHighlights() {
+  const el = $("#highlights");
+  if (!S.data || !el) return;
+  const tops = topMatches(), sc = topScorers();
+  const hero = (m) => {
+    const c = S.data.competitions[m.comp], d = new Date(m.date);
+    const pickTxt = m.pick === "home" ? m.home.name : m.pick === "away" ? m.away.name : "Match nul";
+    return `<article class="hero" data-key="${esc(m.key)}" style="--tint:${COMP_TINT[m.comp] || "#1d2a55"}">
+      ${ghost(m.home.crest, "gl")}${ghost(m.away.crest, "gr")}
+      <div class="hmeta"><span>${c.flag} ${esc(c.name)}</span><span>${dayWord(d)} · ${hhmm(d)}</span></div>
+      <div class="hteams">
+        <div class="ht">${crest(m.home.crest, m.home.name, "hcrest")}<b>${esc(m.home.name)}</b></div>
+        <span class="hvs">VS</span>
+        <div class="ht">${crest(m.away.crest, m.away.name, "hcrest")}<b>${esc(m.away.name)}</b></div>
+      </div>
+      ${oddsRow(m)}
+      <div class="hpick">Prono de l'app : <b>${esc(pickTxt)}</b> · ${pct(m.final[m.pick])}${m.pick_score ? ` · score ${esc(m.pick_score.score)}` : ""}</div>
+    </article>`;
+  };
+  const scard = (p, i) => {
+    const d = new Date(p.date);
+    return `<article class="scard" data-key="${esc(p.key)}">
+      ${ghost(p.crest, "gs")}
+      <span class="srank">#${i + 1}</span>${crest(p.crest, p.team, "screst")}
+      <b class="sname">${esc(p.name)}</b>
+      <small class="steam">${esc(p.team)}${p.goals != null ? ` · ${p.goals} but${p.goals > 1 ? "s" : ""}` : ""}</small>
+      <div class="sp"><b>${pct(p.p)}</b><small>de marquer</small></div>
+      <div class="sfair">cote juste <b>${n2(p.fair)}</b></div>
+      <small class="swhen">contre ${esc(p.opp)} · ${dayWord(d)} ${hhmm(d)}</small>
+    </article>`;
+  };
+  el.innerHTML = (tops.length ? `<div class="hl-head"><h3>À la une</h3></div><div class="rail">${tops.map(hero).join("")}</div>` : "") +
+    (sc.length ? `<div class="hl-head"><h3>Top buteurs</h3><span>chance de marquer, s'il joue</span></div><div class="rail">${sc.map(scard).join("")}</div>` : "");
+  el.onclick = (e) => { const c = e.target.closest("[data-key]"); if (c) openSheet(c.dataset.key); };
+}
+
 // ------------------------------------------------------------------ fiche
+function showSheet() { $("#sheet").classList.add("on"); $("#sheet-bg").classList.add("on"); $("#sheet").scrollTop = 0; }
+
 function openSheet(key) {
   const m = S.data.matches.find((x) => x.key === key); if (!m) return;
   const c = S.data.competitions[m.comp], f = m.final, mo = m.model, mk = m.market;
@@ -204,7 +303,7 @@ function openSheet(key) {
     const b = e.target.closest(".add"); if (!b) return;
     toggleCombo(m, b.dataset.sel); b.classList.toggle("in");
   };
-  $("#sheet").classList.add("on"); $("#sheet-bg").classList.add("on"); $("#sheet").scrollTop = 0;
+  showSheet();
 }
 function closeSheet() { $("#sheet").classList.remove("on"); $("#sheet-bg").classList.remove("on"); }
 
@@ -239,8 +338,9 @@ function renderTickets() {
   $("#tickets").innerHTML = Object.entries(T.formulas).map(([fid, fm]) => ticketHTML(fid, fm, res[fid])).join("") +
     `<p class="src tnote">Rendement moyen = ce que le ticket rapporte en moyenne par euro misé, d'après les probas de l'app. Négatif = la marge du bookmaker l'emporte : c'est le cas le plus fréquent. Les cotes marquées ≈ (double chance) sont estimées : vérifie-les chez ${esc(S.book)}.</p>`;
   $("#tickets").onclick = (e) => {
-    const b = e.target.closest(".copy"); if (!b) return;
-    copyTicket(b.dataset.f);
+    const b = e.target.closest(".copy, .play"); if (!b) return;
+    if (b.classList.contains("copy")) copyTicket(b.dataset.f);
+    else playTicket(b.dataset.f);
   };
   $("#combis").innerHTML = combisHTML();
   $("#buteurs").innerHTML = buteursHTML();
@@ -306,8 +406,19 @@ function ticketHTML(fid, fm, t) {
     </div>
     ${started ? '<p class="note">⚠ Un match a déjà commencé : ce ticket n\'est plus jouable tel quel. Il sera remplacé au prochain calcul.</p>' : ""}
     ${t.window_h > 48 ? `<p class="src">${t.window_h > 100 ? "Construit avec les matchs de la semaine (rien de jouable dans les 4 prochains jours)." : "Pas assez de matchs dans les 48 h : ticket élargi aux 4 prochains jours."}</p>` : ""}
-    <button class="copy" data-f="${fid}">Copier le ticket</button>
+    <div class="tact"><button class="copy" data-f="${fid}">Copier</button>
+      ${isPlayed(fid, t) ? `<button class="play done" data-f="${fid}">Dans Mes paris ✓</button>` : started ? "" : `<button class="play" data-f="${fid}">Je l'ai joué</button>`}</div>
   </article>`;
+}
+
+const legSig = (legs) => legs.map((l) => l.key + "|" + l.sel).sort().join(",");
+const isPlayed = (src, t) => S.bets.some((b) => b.src === src && legSig(b.legs) === legSig(t.legs));
+
+function playTicket(fid) {
+  const t = currentTickets()[fid]; if (!t) return;
+  if (isPlayed(fid, t)) { toast("Déjà dans Mes paris"); return; }
+  openBetForm({ src: fid, book: S.book, odds: t.odds,
+    legs: t.legs.map(({ key, comp, date, match, hc, ac, sel, label, odd }) => ({ key, comp, date, match, hc, ac, sel, label, odd })) });
 }
 
 function copyTicket(fid) {
@@ -359,6 +470,20 @@ function toggleCombo(m, sel) {
   store.set("combo", S.combo); renderCombo();
 }
 
+function selLabel(m, sel) {
+  return { home: `${m.home.name} gagne`, draw: "Match nul", away: `${m.away.name} gagne`, over: "Plus de 2,5 buts",
+    under: "Moins de 2,5 buts", btts: "Les 2 équipes marquent" }[sel];
+}
+function selOdd(m, sel) {   // cote du bookmaker choisi quand on l'a (pas pour « les 2 marquent »)
+  const bk = bookOf(m);
+  if (["home", "draw", "away"].includes(sel)) return bk ? bk[{ home: "h", draw: "d", away: "a" }[sel]] || null : null;
+  if (sel === "over" || sel === "under") {
+    const want = S.book || "Betclic", tb = (m.totals_books || []).find((x) => x.book === want);
+    return tb ? tb[sel] || null : null;
+  }
+  return null;
+}
+
 function renderCombo() {
   const live = S.combo.map((s) => ({ ...s, m: S.data && S.data.matches.find((x) => x.key === s.key) })).filter((s) => s.m);
   if (S.data && live.length !== S.combo.length) { S.combo = live.map(({ m, ...s }) => s); store.set("combo", S.combo); }
@@ -367,43 +492,274 @@ function renderCombo() {
   const sameMatch = new Set(live.map((s) => s.key)).size < live.length;
   const p = live.reduce((a, s) => a * selProb(s.m, s.sel), 1);
   const fair = 1 / p;
+  const odds = live.map((s) => selOdd(s.m, s.sel));
+  const bookTotal = !sameMatch && odds.every((o) => o) ? odds.reduce((a, o) => a * o, 1) : null;
   const saved = store.get("combo_odd", "");
   $("#combo").innerHTML = `
-    ${live.map((s) => `<div class="sel"><div>${esc(SEL_LBL[s.sel])}<small>${esc(s.label)}</small></div><div style="display:flex;align-items:center;gap:8px"><span class="pct" style="font-size:20px;font-weight:700">${pct(selProb(s.m, s.sel))}</span><button class="x" data-id="${esc(s.id)}">×</button></div></div>`).join("")}
+    ${live.map((s, i) => `<div class="sel"><div class="lmain">${crests(s.m.home.crest, s.m.away.crest)}<div>${esc(selLabel(s.m, s.sel))}<small>${esc(s.label)} · ${fmtWhen(s.m.date)}</small></div></div>
+      <div class="sright">${odds[i] ? `<span class="obadge">${n2(odds[i])}</span>` : ""}<span class="pct">${pct(selProb(s.m, s.sel))}</span><button class="x" data-id="${esc(s.id)}" aria-label="Retirer">×</button></div></div>`).join("")}
     <div class="kpis">
       <div class="kpi"><div class="v">${p >= 0.01 ? Math.round(p * 1000) / 10 + " %" : "< 1 %"}</div><div class="l">Chance que tout passe</div></div>
       <div class="kpi"><div class="v">${n2(fair)}</div><div class="l">Cote « juste » (sans marge)</div></div>
     </div>
-    <div class="input"><span class="src">Cote proposée</span><input id="odd-in" inputmode="decimal" placeholder="ex : 12,50" value="${esc(saved)}"></div>
+    <div class="input"><span class="src">Cote ${esc(S.book || "Betclic")}</span><input id="odd-in" inputmode="decimal" placeholder="${bookTotal ? n2(bookTotal) : "ex : 12,50"}" value="${esc(saved)}"></div>
+    ${bookTotal ? `<p class="src" style="margin-top:6px">Calculée avec les cotes relevées : ${n2(bookTotal)}. Corrige-la si l'appli de ton bookmaker affiche autre chose (boost, cote qui a bougé).</p>` : ""}
     <div id="verdict"></div>
     ${sameMatch ? '<p class="note">⚠ Plusieurs sélections sur le même match : elles sont liées, le calcul les traite comme indépendantes et devient approximatif.</p>' : ""}
+    <button class="cta" id="combo-play">Je l'ai joué</button>
     <p class="src" style="margin-top:12px">Ce combiné passe environ 1 fois sur ${Math.max(1, Math.round(fair))}. Chaque sélection ajoutée cumule la marge du bookmaker, c'est pour ça que les gros combinés sont rarement rentables.</p>
     <button class="btn" id="combo-clear">Vider le combiné</button>`;
+  const offered = () => num($("#odd-in").value) || bookTotal || 0;
   const verdict = () => {
-    const v = parseFloat(($("#odd-in").value || "").replace(",", "."));
     store.set("combo_odd", $("#odd-in").value);
+    const v = offered();
     if (!v || v <= 1) { $("#verdict").innerHTML = ""; return; }
     const ev = p * v - 1;
-    $("#verdict").innerHTML = `<div class="verdict ${ev >= 0 ? "ok" : "bad"}">Espérance : <b>${ev >= 0 ? "+" : ""}${Math.round(ev * 100)} %</b> par euro misé.
+    $("#verdict").innerHTML = `<div class="verdict ${ev >= 0 ? "ok" : "bad"}">Espérance à ${n2(v)} : <b>${ev >= 0 ? "+" : ""}${Math.round(ev * 100)} %</b> par euro misé.
       ${ev < 0 ? `En moyenne, tu perds ${Math.abs(Math.round(ev * 100))} centimes par euro sur ce type de pari.` : "La cote paie plus que la chance estimée, mais ça reste une estimation : garde des mises raisonnables."}</div>`;
   };
   $("#odd-in").addEventListener("input", verdict); verdict();
   $("#combo").onclick = (e) => {
     const x = e.target.closest(".x");
     if (x) { S.combo = S.combo.filter((s) => s.id !== x.dataset.id); store.set("combo", S.combo); renderCombo(); }
-    if (e.target.id === "combo-clear") { S.combo = []; store.set("combo", []); renderCombo(); }
+    if (e.target.id === "combo-clear") { S.combo = []; store.set("combo", []); store.set("combo_odd", ""); renderCombo(); }
+    if (e.target.id === "combo-play") {
+      openBetForm({ src: "combine", book: S.book || "Betclic", odds: offered() > 1 ? offered() : null,
+        legs: live.map((s, i) => ({ key: s.m.key, comp: s.m.comp, date: s.m.date, match: `${s.m.home.name} – ${s.m.away.name}`,
+          hc: s.m.home.crest || "", ac: s.m.away.crest || "", sel: s.sel, label: selLabel(s.m, s.sel), odd: odds[i] })) });
+    }
   };
+}
+
+// ------------------------------------------------------------------ mes paris (gardés sur l'appareil)
+const LEG_WON = { home: (h, a) => h > a, draw: (h, a) => h === a, away: (h, a) => h < a, "1N": (h, a) => h >= a, N2: (h, a) => h <= a,
+  "12": (h, a) => h !== a, over: (h, a) => h + a > 2.5, under: (h, a) => h + a < 2.5, btts: (h, a) => h > 0 && a > 0 };
+const SEL_TYPE = { home: "Victoire d'une équipe", away: "Victoire d'une équipe", draw: "Match nul", "1N": "Double chance",
+  N2: "Double chance", "12": "Double chance", over: "Plus de 2,5 buts", under: "Moins de 2,5 buts", btts: "Les 2 équipes marquent" };
+function srcName(src) {
+  const fm = S.tickets && S.tickets.formulas && S.tickets.formulas[src];
+  return fm ? `${fm.emoji} Ticket ${fm.name}` : src === "combine" ? "🧩 Mon combiné" : "Pari";
+}
+function legState(l) {
+  const r = S.res[l.key];
+  if (r && r[0] != null) return LEG_WON[l.sel] && LEG_WON[l.sel](r[0], r[1]) ? "won" : "lost";
+  if (Date.now() - new Date(l.date) > 4 * 864e5) return "void";   // match reporté ou score introuvable
+  return "wait";
+}
+function betState(b) {
+  if (b.manual) return b.manual;
+  const st = b.legs.map(legState);
+  if (st.includes("lost")) return "lost";
+  if (st.includes("wait")) return "wait";
+  return st.every((s) => s === "void") ? "void" : "won";
+}
+function betReturn(b, st = betState(b)) {
+  if (st === "won") {
+    let o = b.odds;
+    if (!b.manual) for (const l of b.legs) if (legState(l) === "void" && l.odd) o /= l.odd;   // sélection annulée = cote 1
+    return b.stake * Math.max(o, 1);
+  }
+  return st === "void" ? b.stake : 0;
+}
+function saveBets() { store.set("bets", S.bets); }
+
+function openBetForm(d) {
+  const n = d.legs.length;
+  $("#sheet").innerHTML = `<div class="sheet-top"><span></span><div class="grab"></div><button class="close" aria-label="Fermer">×</button></div>
+    <h2 class="title">Je l'ai joué</h2>
+    <p class="src">${esc(srcName(d.src))} · ${n} sélection${n > 1 ? "s" : ""} · ${esc(d.book || "Betclic")}</p>
+    <ul class="legs bf">${d.legs.map((l) => `<li><div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span><small>${flagOf(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)}</small></div></div>${l.odd ? `<span class="obadge">${n2(l.odd)}</span>` : ""}</li>`).join("")}</ul>
+    <div class="bf-grid">
+      <label class="input"><span class="src">Mise</span><input id="bf-stake" inputmode="decimal" value="${esc(S.stake)}"><span class="src">€</span></label>
+      <label class="input"><span class="src">Cote</span><input id="bf-odds" inputmode="decimal" value="${d.odds ? n2(d.odds) : ""}" placeholder="ex : 3,40"></label>
+    </div>
+    <p class="src" style="margin-top:8px">Mets la cote exacte que ${esc(d.book || "Betclic")} t'a donnée au moment de jouer.</p>
+    <button class="cta" id="bf-save">Enregistrer le pari</button>
+    <p class="src" style="margin-top:10px">Enregistré sur cet appareil. Le résultat se met à jour tout seul avec les scores.</p>`;
+  $("#sheet").onclick = (e) => {
+    if (e.target.closest(".close")) { closeSheet(); return; }
+    if (e.target.id !== "bf-save") return;
+    const stake = num($("#bf-stake").value), odds = num($("#bf-odds").value);
+    if (!(stake > 0) || !(odds > 1)) { toast("Indique la mise et la cote"); return; }
+    S.bets.unshift({ id: "b" + Date.now().toString(36), at: new Date().toISOString(), src: d.src, book: d.book || "Betclic",
+      stake: Math.round(stake * 100) / 100, odds: Math.round(odds * 100) / 100, legs: d.legs });
+    saveBets(); closeSheet(); toast("Ajouté à Mes paris");
+    renderTickets(); renderMP();
+  };
+  showSheet();
+}
+
+function renderMP() {
+  const pend = S.bets.filter((b) => betState(b) === "wait").length;
+  $("#mp-seg").innerHTML = [["combo", "Combiné"], ["bets", `Mes paris${pend ? ` (${pend})` : ""}`], ["stats", "Bilan"]]
+    .map(([k, l]) => `<button data-v="${k}" class="${S.mp === k ? "on" : ""}">${l}</button>`).join("");
+  $("#mp-seg").onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    S.mp = b.dataset.v; store.set("mp", S.mp); renderMP(); window.scrollTo(0, 0);
+  };
+  for (const k of ["combo", "bets", "stats"]) $("#mp-" + k).hidden = S.mp !== k;
+  if (S.mp === "bets") $("#mp-bets").innerHTML = betsHTML();
+  if (S.mp === "stats") $("#mp-stats").innerHTML = statsHTML();
+  renderCombo();
+}
+
+function betsHTML() {
+  if (!S.bets.length) return `<p class="empty">Aucun pari enregistré.<br>Touche « Je l'ai joué » sous un ticket ou dans ton combiné : le résultat et ton bilan se mettront à jour tout seuls.</p>`;
+  const list = S.bets.map((b) => ({ b, st: betState(b) }))
+    .sort((x, y) => ((x.st === "wait") === (y.st === "wait") ? (x.b.at < y.b.at ? 1 : -1) : x.st === "wait" ? -1 : 1));
+  let html = "", head = "";
+  for (const { b, st } of list) {
+    const h = st === "wait" ? "En cours" : "Terminés";
+    if (h !== head) { head = h; html += `<div class="day">${h}</div>`; }
+    html += betCard(b, st);
+  }
+  return html + `<p class="src" style="margin-top:10px">Un match reporté (sans score après 4 jours) compte comme remboursé. Si ton bookmaker a réglé autrement (cash out, règle spéciale), corrige avec ⋯.</p>`;
+}
+
+function betCard(b, st) {
+  const ret = betReturn(b, st);
+  const pill = { wait: "En cours", won: "Gagné", lost: "Perdu", void: "Remboursé" }[st];
+  const legs = b.legs.map((l) => {
+    const ls = legState(l), r = S.res[l.key];
+    return `<li class="leg ${ls}"><div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span>
+      <small>${flagOf(l.comp)} ${esc(l.match)} · ${r ? `<b>${r[0]}-${r[1]}</b>` : fmtWhen(l.date)}</small></div></div>
+      <span class="lst">${{ won: "✓", lost: "✗", void: "–", wait: "" }[ls]}</span></li>`;
+  }).join("");
+  const money = st === "wait" ? `<span>Gain possible</span><b>${euro(b.stake * b.odds)}</b>`
+    : st === "won" ? `<span>Gagné</span><b class="pos">+${euro(ret - b.stake)}</b>`
+    : st === "lost" ? `<span>Perdu</span><b class="neg">−${euro(b.stake)}</b>` : `<span>Remboursé</span><b>${euro(b.stake)}</b>`;
+  return `<article class="bet ${st}" data-id="${b.id}">
+    <header><span class="pill ${st}">${pill}${b.manual ? " · corrigé" : ""}</span><span class="src">${esc(srcName(b.src))}</span></header>
+    <ul class="legs">${legs}</ul>
+    <div class="slip">
+      <div><span>Mise · cote</span><span><b>${euro(b.stake)}</b> <span class="obadge">${n2(b.odds)}</span></span></div>
+      <div>${money}</div>
+    </div>
+    <div class="bfoot"><span class="src">${esc(b.book)} · joué ${new Date(b.at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span><button class="more" data-act="more" aria-label="Corriger">⋯</button></div>
+    <div class="bact"><button data-act="won">Gagné</button><button data-act="lost">Perdu</button><button data-act="void">Remboursé</button>
+      ${b.manual ? '<button data-act="auto">Automatique</button>' : ""}<button data-act="del" class="danger">Supprimer</button></div>
+  </article>`;
+}
+
+function onBetAction(e) {
+  const btn = e.target.closest("[data-act]"); if (!btn) return;
+  const card = btn.closest(".bet"), b = S.bets.find((x) => x.id === card.dataset.id); if (!b) return;
+  const act = btn.dataset.act;
+  if (act === "more") { card.classList.toggle("open"); return; }
+  if (act === "del") {
+    if (!btn.classList.contains("armed")) { btn.classList.add("armed"); btn.textContent = "Confirmer ?"; return; }
+    S.bets = S.bets.filter((x) => x !== b); toast("Pari supprimé");
+  } else b.manual = act === "auto" ? null : act;
+  saveBets(); renderMP(); renderTickets();
+}
+
+const pctBar = (w, n) => `<span class="rate"><i style="width:${Math.round((w / n) * 100)}%"></i></span><b>${Math.round((w / n) * 100)} %</b><small>${w}/${n}</small>`;
+
+function statsHTML() {
+  const all = S.bets.map((b) => ({ b, st: betState(b) }));
+  const done = all.filter((x) => x.st !== "wait");
+  const staked = done.reduce((a, x) => a + x.b.stake, 0), back = done.reduce((a, x) => a + betReturn(x.b, x.st), 0);
+  const won = done.filter((x) => x.st === "won").length, profit = back - staked;
+  const byComp = {}, byType = {}, bySrc = {};
+  for (const { b } of all) for (const l of b.legs) {
+    const ls = legState(l); if (ls !== "won" && ls !== "lost") continue;
+    for (const [o, k] of [[byComp, l.comp], [byType, SEL_TYPE[l.sel] || "Autre"]]) { o[k] = o[k] || [0, 0]; o[k][0]++; if (ls === "won") o[k][1]++; }
+  }
+  for (const { b, st } of done) {
+    const o = (bySrc[b.src] = bySrc[b.src] || { n: 0, w: 0, st: 0, back: 0 });
+    o.n++; o.st += b.stake; o.back += betReturn(b, st); if (st === "won") o.w++;
+  }
+  const rows = (o, lbl) => Object.entries(o).sort((a, b) => b[1][0] - a[1][0])
+    .map(([k, [n, w]]) => `<div class="rrow"><span>${lbl(k)}</span>${pctBar(w, n)}</div>`).join("");
+  const mine = !S.bets.length ? `<p class="src">Tu n'as encore rien enregistré : touche « Je l'ai joué » sous un ticket ou dans ton combiné.</p>`
+    : `<div class="kpis k4">
+        <div class="kpi"><div class="v">${euro(staked)}</div><div class="l">Misé (paris terminés)</div></div>
+        <div class="kpi"><div class="v ${profit >= 0 ? "pos" : "neg"}">${profit >= 0 ? "+" : "−"}${euro(Math.abs(profit))}</div><div class="l">Bilan</div></div>
+        <div class="kpi"><div class="v">${staked ? `${profit >= 0 ? "+" : ""}${Math.round((profit / staked) * 100)} %` : "–"}</div><div class="l">Rendement</div></div>
+        <div class="kpi"><div class="v">${won}/${done.length}</div><div class="l">Paris gagnés</div></div>
+      </div>
+      ${all.length > done.length ? `<p class="src">${all.length - done.length} pari${all.length - done.length > 1 ? "s" : ""} en cours, pas encore compté${all.length - done.length > 1 ? "s" : ""}.</p>` : ""}
+      ${Object.keys(byComp).length ? `<h3 class="day">Tes sélections par compétition</h3>${rows(byComp, (c) => `${flagOf(c)} ${esc((S.data && S.data.competitions[c] || { name: c }).name)}`)}` : ""}
+      ${Object.keys(byType).length ? `<h3 class="day">Tes sélections par type de pari</h3>${rows(byType, esc)}` : ""}
+      ${Object.keys(bySrc).length ? `<h3 class="day">Par ticket</h3>${Object.entries(bySrc).map(([k, o]) => {
+        const p = o.back - o.st;
+        return `<div class="rrow"><span>${esc(srcName(k))}</span><b class="${p >= 0 ? "pos" : "neg"}">${p >= 0 ? "+" : "−"}${euro(Math.abs(p))}</b><small>${o.w}/${o.n} gagnés</small></div>`;
+      }).join("")}` : ""}`;
+  return `${appRatesHTML(true)}
+    <h3 class="day">Ton bilan</h3>${mine}
+    <div class="io"><button class="btn" id="bets-export">Copier mes paris</button><button class="btn" id="bets-import">Coller des paris</button></div>
+    <p class="src">Tes paris sont gardés sur cet appareil. Pour les retrouver sur ton ordi ou ton téléphone : « Copier mes paris » ici, puis « Coller des paris » sur l'autre appareil.</p>
+    ${disclaimer()}`;
+}
+
+function exportBets() {
+  const code = "PRONOS1:" + btoa(unescape(encodeURIComponent(JSON.stringify(S.bets))));
+  const done = () => toast("Code copié : colle-le sur l'autre appareil");
+  if (navigator.clipboard) navigator.clipboard.writeText(code).then(done).catch(() => window.prompt("Copie ce code :", code));
+  else window.prompt("Copie ce code :", code);
+}
+function importBets() {
+  const code = (window.prompt("Colle ici le code copié sur l'autre appareil :") || "").trim();
+  if (!code) return;
+  try {
+    const list = JSON.parse(decodeURIComponent(escape(atob(code.replace(/^PRONOS1:/, "")))));
+    if (!Array.isArray(list)) throw new Error();
+    const have = new Set(S.bets.map((b) => b.id));
+    const add = list.filter((b) => b && b.id && Array.isArray(b.legs) && b.stake > 0 && b.odds > 1 && !have.has(b.id));
+    S.bets = S.bets.concat(add).sort((a, b) => (a.at < b.at ? 1 : -1));
+    saveBets(); renderMP(); renderTickets(); toast(`${add.length} pari${add.length > 1 ? "s" : ""} ajouté${add.length > 1 ? "s" : ""}`);
+  } catch { toast("Code illisible"); }
+}
+
+// ------------------------------------------------------------------ où l'app vise juste
+const MK = [["fav", "Favori"], ["dc", "Double chance"], ["sure", "Favori ≥ 60 %"], ["o25", "± 2,5 buts"], ["btts", "Les 2 marquent"]];
+const MK_LONG = { fav: "le favori de l'app (1N2)", dc: "la double chance", sure: "le favori quand l'app le donne à 60 % ou plus",
+  o25: "plus/moins de 2,5 buts", btts: "« les 2 équipes marquent » oui/non" };
+function appRates() {
+  const P = S.perf; if (!P || !S.data) return [];
+  const live = (P.live && P.live.markets) || {}, bt = (P.backtest && P.backtest.markets) || {};
+  const rows = [];
+  for (const [c, info] of Object.entries(S.data.competitions)) {
+    const lv = (live.by_comp || {})[c] || {}, bv = (bt.by_comp || {})[c] || {};
+    const useLive = (lv.fav && lv.fav.n >= 60) || !(bv.fav && bv.fav.n);
+    const src = useLive ? lv : bv;
+    if (src.fav && src.fav.n >= 10) rows.push({ c, info, src, live: useLive });
+  }
+  return rows;
+}
+function appRatesHTML(compact) {
+  const rows = appRates();
+  const head = `<h3 class="day">Où l'app vise juste</h3>`;
+  if (!rows.length) return head + '<p class="src">Pas encore assez de matchs vérifiés pour comparer les compétitions.</p>';
+  const cell = (v) => {
+    if (!v || v.n < 10) return '<td class="na">–</td>';
+    const h = v.hit >= 0.75 ? 3 : v.hit >= 0.62 ? 2 : v.hit >= 0.52 ? 1 : 0;
+    return `<td class="heat h${h}"><b>${Math.round(v.hit * 100)}</b><small>${v.n}</small></td>`;
+  };
+  // le meilleur endroit pour chaque type de pari, puis les 3 plus hauts (sinon la double chance prendrait toute la place)
+  const best = MK.map(([k]) => rows.map((r) => ({ r, k, v: r.src[k] })).filter((x) => x.v && x.v.n >= 25)
+    .sort((a, b) => b.v.hit - a.v.hit)[0]).filter(Boolean).sort((a, b) => b.v.hit - a.v.hit).slice(0, 3);
+  const P = S.perf, since = P.live && P.live.markets && P.live.markets.since;
+  return `${head}
+    <p class="src" style="margin-bottom:8px">% de fois où le choix de l'app est passé, par compétition et par type de pari (petit chiffre = nombre de matchs).</p>
+    ${best.length ? `<div class="best">${best.map((x, i) => `<div><span class="bn">${i + 1}</span><span>${cap(MK_LONG[x.k])} en ${x.r.info.flag} ${esc(x.r.info.name)}</span>
+      <b>${Math.round(x.v.hit * 100)} %</b><small>annoncé ${Math.round(x.v.said * 100)} % · ${x.v.n} matchs</small></div>`).join("")}</div>` : ""}
+    <div class="rt-wrap"><table class="rt"><tr><th></th>${MK.map(([, l]) => `<th>${l}</th>`).join("")}</tr>
+      ${rows.map((r) => `<tr><td>${r.info.flag} ${esc(r.info.name)}${r.live ? "" : '<sup>*</sup>'}</td>${MK.map(([k]) => cell(r.src[k])).join("")}</tr>`).join("")}
+    </table></div>
+    <p class="src" style="margin-top:6px">* test sur les 12 dernières semaines (modèle seul, sans les cotes). Sans astérisque : pronos réels de l'app${since ? ` suivis depuis le ${new Date(since).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}` : ""}.</p>
+    <p class="note">${compact ? "" : "⚠ "}Un % élevé ne veut pas dire rentable : la double chance passe souvent mais paie peu (souvent 1,20 à 1,50). Ce qui compte, c'est que la cote paie plus que la chance réelle.</p>`;
 }
 
 // ------------------------------------------------------------------ fiabilité
 function calChart(cal) {
   if (!cal || cal.length < 2) return '<p class="src">Pas encore assez de matchs pour la courbe.</p>';
   const W = 330, H = 220, P = 40, x = (v) => P + v * (W - P - 10), y = (v) => H - P - v * (H - P - 10);
-  const pts = cal.map((c) => `<circle cx="${x(c.pred)}" cy="${y(c.real)}" r="${Math.min(3 + Math.sqrt(c.n) / 2, 9)}" fill="#d9ff4a" fill-opacity=".8"/>`).join("");
+  const pts = cal.map((c) => `<circle cx="${x(c.pred)}" cy="${y(c.real)}" r="${Math.min(3 + Math.sqrt(c.n) / 2, 9)}" fill="#ffd60a" fill-opacity=".8"/>`).join("");
   const line = cal.map((c, i) => `${i ? "L" : "M"}${x(c.pred)},${y(c.real)}`).join(" ");
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => `<text x="${x(t)}" y="${H - 10}" fill="#5c7468" font-size="10" text-anchor="middle">${t * 100}%</text><text x="${P - 6}" y="${y(t) + 3}" fill="#5c7468" font-size="10" text-anchor="end">${t * 100}%</text>`).join("");
-  return `<svg class="cal" viewBox="0 0 ${W} ${H}"><line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="#22382d" stroke-dasharray="4 4"/>
-    <path d="${line}" fill="none" stroke="#d9ff4a" stroke-opacity=".5"/>${pts}${ticks}</svg>
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => `<text x="${x(t)}" y="${H - 10}" fill="#5f6a88" font-size="10" text-anchor="middle">${t * 100}%</text><text x="${P - 6}" y="${y(t) + 3}" fill="#5f6a88" font-size="10" text-anchor="end">${t * 100}%</text>`).join("");
+  return `<svg class="cal" viewBox="0 0 ${W} ${H}"><line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="#263052" stroke-dasharray="4 4"/>
+    <path d="${line}" fill="none" stroke="#ffd60a" stroke-opacity=".5"/>${pts}${ticks}</svg>
     <p class="src" style="margin-top:6px">Axe horizontal : proba annoncée. Vertical : fréquence réelle. Plus les points collent à la diagonale, plus les % sont fiables.</p>`;
 }
 
@@ -424,6 +780,7 @@ function renderPerf() {
   const src = meta ? meta.sources : {};
   const ok = (b) => (b ? "✅" : "⛔");
   $("#perf").innerHTML = `
+    ${appRatesHTML(false)}
     <h3 class="day">En conditions réelles</h3>
     <p class="src" style="margin-bottom:8px">Pronos figés avant le coup d'envoi, puis comparés au score final.</p>
     ${kpis(live.all, live.market_only)}

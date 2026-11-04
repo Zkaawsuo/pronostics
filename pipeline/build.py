@@ -76,6 +76,38 @@ def metrics(rows, key="p"):
                             for b in bins if b[0] >= 5]}
 
 
+MARKETS = ("fav", "dc", "sure", "o25", "btts")
+
+
+def hit_rates(rows):
+    """Réussite du choix le plus probable de l'appli, par type de pari.
+
+    fav : le favori 1N2 · dc : la double chance (tout sauf l'issue la moins probable) · sure : le favori quand
+    l'appli le donne à 60 % ou plus · o25 : plus/moins de 2,5 buts · btts : les 2 équipes marquent oui/non.
+    Pour chacun : n matchs, hit = % gagnés, said = % annoncé en moyenne (pour voir si l'appli est trop sûre d'elle).
+    """
+    acc = {k: [0, 0, 0.0] for k in MARKETS}
+    for r in rows:
+        if not (r.get("p") and r.get("result")) or None in r["p"]:
+            continue
+        hg, ag = r["result"]
+        o = 0 if hg > ag else 1 if hg == ag else 2
+        p = r["p"]
+        top = max(range(3), key=lambda i: p[i])
+        low = min(range(3), key=lambda i: p[i])
+        picks = [("fav", top == o, p[top]), ("dc", o != low, 1 - p[low])]
+        if p[top] >= 0.60:
+            picks.append(("sure", top == o, p[top]))
+        if r.get("o25") is not None:
+            picks.append(("o25", (hg + ag > 2.5) == (r["o25"] >= 0.5), max(r["o25"], 1 - r["o25"])))
+        if r.get("btts") is not None:
+            picks.append(("btts", (hg > 0 and ag > 0) == (r["btts"] >= 0.5), max(r["btts"], 1 - r["btts"])))
+        for k, hit, pp in picks:
+            a = acc[k]
+            a[0] += 1; a[1] += int(hit); a[2] += pp
+    return {k: {"n": n, "hit": round(w / n, 3), "said": round(s / n, 3)} for k, (n, w, s) in acc.items() if n}
+
+
 def blend_elo(lam, mu, elo_h, elo_a, w, neutral=False):
     if not w or elo_h is None or elo_a is None:
         return lam, mu
@@ -231,7 +263,8 @@ def scorers_for(team, lam_team, side):
     out = []
     for a in lst:
         p = scorer_prob(a["goals"], a["matches"], lam_team / max(avg, 0.3), a["pg"], a["pm"])
-        out.append({"name": nice_name(a["name"]), "side": side, "p": r3(p), "fair": round(1 / p, 2)})
+        out.append({"name": nice_name(a["name"]), "side": side, "p": r3(p), "fair": round(1 / p, 2),
+                    "goals": a["goals"], "games": a["matches"]})
     return out
 
 
@@ -450,10 +483,10 @@ history = {k: v for k, v in history.items() if (NOW - dt(v["date"])).days < 400}
 # ======================================================================== 7. auto-réglage
 # 7a. test glissant hebdo : xG, mémoire du modèle et poids de l'Elo choisis sur 12 semaines réelles
 bt = state.get("backtest")
-if bt and bt.get("v") != 3:   # nouvelles sources (Elo maison, xG par les tirs) : on repart des réglages de départ
+if bt and bt.get("v", 0) < 3:   # nouvelles sources (Elo maison, xG par les tirs) : on repart des réglages de départ
     for k in ("xg_weight", "xi", "elo_weight", "at"):
         tuned.pop(k, None)
-if league_table and (not bt or bt.get("v") != 3 or (NOW - dt(bt["at"])).days >= 6):
+if league_table and (not bt or bt.get("v", 0) < 4 or (NOW - dt(bt["at"])).days >= 6):
     starts = [NOW - timedelta(days=7 * w) for w in range(12, 0, -1)]
     elo_hist = {}
     if elo_source == "clubelo":
@@ -496,6 +529,7 @@ if league_table and (not bt or bt.get("v") != 3 or (NOW - dt(bt["at"])).days >= 
                                 lam, mu = l, u_
                             pr = markets_from_matrix(score_matrix(lam, mu, mdl.rho))
                             rows_by[(xg_w, xi, ew)].append({"comp": code, "p": [pr["home"], pr["draw"], pr["away"]],
+                                                            "o25": pr["over_2.5"], "btts": pr["btts"],
                                                             "result": [m["hg"], m["ag"]]})
     scores = {k: metrics(v) for k, v in rows_by.items()}
     scores = {k: v for k, v in scores.items() if v}
@@ -516,8 +550,10 @@ if league_table and (not bt or bt.get("v") != 3 or (NOW - dt(bt["at"])).days >= 
         freq = np.bincount([0 if r["result"][0] > r["result"][1] else 1 if r["result"][0] == r["result"][1] else 2
                             for r in rows_c], minlength=3) / len(rows_c)
         base = metrics([{"p": list(freq), "result": r["result"]} for r in rows_c])
-    new_bt = {"v": 3, "at": NOW.isoformat(), "weeks": 12, "elo_source": elo_source, "xg_source": xg_source, "all": metrics(rows_c), "baseline": base,
+    new_bt = {"v": 4, "at": NOW.isoformat(), "weeks": 12, "elo_source": elo_source, "xg_source": xg_source, "all": metrics(rows_c), "baseline": base,
           "by_comp": {c: metrics([r for r in rows_c if r["comp"] == c]) for c in league_table},
+          "markets": {"all": hit_rates(rows_c),
+                      "by_comp": {c: hit_rates([r for r in rows_c if r["comp"] == c]) for c in league_table}},
           "grid": sorted([{"xg": k[0], "xi": k[1], "elo": k[2], "logloss": v["logloss"],
                            "accuracy": v["accuracy"], "n": v["n"]} for k, v in scores.items()],
                          key=lambda g: g["logloss"])[:8]}
@@ -801,8 +837,10 @@ tk = T.build_all(cards, NOW)
 track_book = tk["books"][0] if tk["books"] else None
 results = {k: v["result"] for k, v in history.items() if v.get("result")}
 tk_hist = load("tickets_history.json", [])
+was_done = {(t.get("formula"), t.get("created")) for t in tk_hist if t["status"] in ("won", "lost")}
 pending, tk_hist = T.track(state.get("tickets_pending", {}), tk_hist,
                            tk["by_book"].get(track_book, {}) if track_book else {}, NOW, results)
+just_settled = [t for t in tk_hist if t["status"] in ("won", "lost") and (t.get("formula"), t.get("created")) not in was_done]
 for t in pending.values():
     t["book"] = track_book
 state["tickets_pending"] = pending
@@ -822,23 +860,49 @@ live = {"all": metrics(settled), "model_only": metrics(settled, "pm"),
                          key=lambda x: x["date"], reverse=True)[:40]}
 o25 = [int((h["result"][0] + h["result"][1] > 2.5) == (h["o25"] >= 0.5)) for h in settled if h.get("o25") is not None]
 live["over25_hit"] = round(float(np.mean(o25)), 3) if o25 else None
+live["markets"] = {"all": hit_rates(settled),
+                   "by_comp": {c: hit_rates([h for h in settled if h["comp"] == c]) for c in C.COMPETITIONS},
+                   "since": min((h["date"] for h in settled), default=None)}
 
 weights = {"market": MKT_W, "xg": XG_W, "xi": XI, "elo": ELO_W, "tuned_at": tuned.get("at"),
            "market_tuned": "market_weight" in tuned}
 
-# ======================================================================== 12b. Telegram (1 message par jour)
-if C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
+# ======================================================================== 12b. Telegram
+if C.TELEGRAM_TOKEN and not C.TELEGRAM_CHAT_ID:
+    # pas encore d'identifiant : le bot répond à ton /start en te donnant le tien (rien n'est enregistré ici)
+    ups, detail = N.get_updates(C.TELEGRAM_TOKEN, state.get("tg_offset"))
+    if ups is None:
+        S.log(f"Telegram : impossible de lire les messages du bot ({detail}). Vérifie le secret TELEGRAM_TOKEN.")
+    else:
+        replied = set()
+        for up in ups:
+            state["tg_offset"] = up["update_id"] + 1
+            chat = (up.get("message") or {}).get("chat") or {}
+            if chat.get("type") == "private" and chat.get("id") and chat["id"] not in replied:
+                replied.add(chat["id"])
+                ok, detail = N.send(C.TELEGRAM_TOKEN, chat["id"], N.id_message(chat["id"]))
+                if not ok:
+                    S.log(f"Telegram : réponse non envoyée ({detail})")
+        if replied:
+            N.get_updates(C.TELEGRAM_TOKEN, state["tg_offset"])   # marque les messages comme lus
+        else:
+            S.log("Telegram : jeton OK. Écris /start à ton bot, il te répondra ton identifiant au prochain calcul.")
+elif C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
+    repo = os.getenv("GITHUB_REPOSITORY", "Zkaawsuo/pronostics").split("/")
+    url = f"https://{repo[0].lower()}.github.io/{repo[-1]}/"
     paris = NOW.astimezone(N.PARIS)
     today = paris.strftime("%Y-%m-%d")
     first = "telegram_day" not in state            # tout premier envoi : tout de suite, pour tester
     if state.get("telegram_day") != today and (first or paris.hour >= 7):
-        repo = os.getenv("GITHUB_REPOSITORY", "Zkaawsuo/pronostics").split("/")
-        url = f"https://{repo[0].lower()}.github.io/{repo[-1]}/"
         ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.message(tk, url))
         if ok:
             state["telegram_day"] = today
         else:
             S.log(f"Telegram : message non envoyé ({detail}). As-tu bien écrit /start à ton bot ?")
+    if just_settled and not first:
+        ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.settled_message(just_settled, T.FORMULAS, url))
+        if not ok:
+            S.log(f"Telegram : alerte de ticket non envoyée ({detail})")
 
 # ======================================================================== 13. écriture
 save("matches.json", {"generated": NOW.isoformat(), "matches": cards, "weights": weights,
@@ -859,6 +923,10 @@ save("meta.json", {"generated": NOW.isoformat(), "warnings": S.LOG[-30:],
                              "rho": {k: round(m.rho, 3) for k, m in models.items()},
                              "home_adv": {k: round(math.exp(m.home_adv), 3) for k, m in models.items()}}})
 save("history.json", history)
+# scores des 60 derniers jours, compacts : l'appli s'en sert pour régler « Mes paris » sur ton téléphone
+save("results.json", {"generated": NOW.isoformat(),
+                      "results": {k: h["result"] for k, h in history.items()
+                                  if h.get("result") and (NOW - dt(h["date"])).days <= 60}})
 save("tickets_history.json", tk_hist)
 save("state.json", state)
 print(f"OK : {len(cards)} matchs, {len(settled)} pronos vérifiés, {len(tk_hist)} tickets suivis, "

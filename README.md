@@ -45,12 +45,28 @@ jusqu'à la semaine si rien n'est jouable dans les 4 jours.
 
 ## Telegram (facultatif)
 
-Chaque matin vers 7 h 30, les 3 tickets, les combis et les buteurs du jour arrivent sur Telegram.
+Chaque matin vers 7 h 30, les 3 tickets, les combis et les buteurs du jour arrivent sur Telegram,
+puis une alerte quand un ticket suivi est gagné ou perdu.
 1. Sur Telegram, écris à @BotFather → /newbot → choisis un nom → il te donne un jeton.
-2. Écris /start à ton nouveau bot (sinon il n'a pas le droit de t'écrire).
-3. Écris /start à @userinfobot : il te répond ton identifiant (Id).
-4. Ajoute 2 secrets GitHub : `TELEGRAM_TOKEN` (le jeton) et `TELEGRAM_CHAT_ID` (l'identifiant).
-Le premier message part au calcul suivant, pour vérifier que tout marche.
+2. Ajoute le secret GitHub `TELEGRAM_TOKEN` (le jeton).
+3. Écris /start à ton nouveau bot. Au calcul suivant, il te répond ton identifiant
+   (pour ne pas attendre : onglet Actions → « Mise à jour des pronos » → Run workflow).
+4. Ajoute le secret `TELEGRAM_CHAT_ID` (l'identifiant). Le premier message part au calcul suivant.
+L'identifiant n'est jamais écrit dans le dépôt (il est public) : il reste dans les secrets.
+
+## Mes paris
+
+Bouton « Je l'ai joué » sous chaque ticket et dans le combiné : le pari (mise, cote obtenue) est
+gardé sur l'appareil, réglé tout seul avec les scores (`data/results.json`), et le bilan montre
+le rendement, la réussite par compétition et par type de pari. « Copier mes paris » / « Coller des paris »
+pour passer du téléphone à l'ordi.
+
+## Où l'app vise juste
+
+Pour chaque compétition et chaque type de pari (favori 1N2, double chance, favori à 60 % ou plus,
+plus/moins de 2,5 buts, les 2 marquent) : le % de fois où le choix de l'app est passé.
+Championnats : test glissant sur 12 semaines (modèle seul). Coupes d'Europe, et championnats dès
+60 matchs suivis : pronos réels figés avant le coup d'envoi.
 
 ## Combis du match (type MyCombi)
 
@@ -59,7 +75,11 @@ Pour chaque match, la matrice de scores donne la vraie chance de deux paris lié
 Betclic ne publie pas ces cotes dans nos sources : l'app affiche la cote juste,
 la combi n'est intéressante que si MyCombi paie plus.
 
-Pas de buteurs : il faudrait des stats de joueurs de la saison en cours (offres payantes).
+## Buteurs
+
+Classements officiels de football-data (saison en cours et précédente, toutes compétitions),
+ramenés au match du jour avec les buts attendus de l'équipe. Chance de marquer « s'il joue » :
+l'app ne connaît pas les compos.
 
 ## Cotes : économie de crédits
 

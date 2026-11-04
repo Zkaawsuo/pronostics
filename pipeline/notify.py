@@ -1,8 +1,9 @@
-"""Envoi quotidien des tickets sur Telegram.
+"""Telegram : tickets du jour, alertes de tickets réglés, et aide pour trouver son identifiant.
 
-Actif seulement si les secrets TELEGRAM_TOKEN et TELEGRAM_CHAT_ID existent sur GitHub.
-Un message par jour, au premier calcul après 7 h (heure de Paris). Le tout premier message part
-dès que les secrets sont en place, pour vérifier que ça marche.
+- Seul TELEGRAM_TOKEN existe : le bot répond à ton /start en t'envoyant ton identifiant (à mettre dans
+  le secret TELEGRAM_CHAT_ID). Rien n'est enregistré dans le dépôt, qui est public.
+- Les deux secrets existent : un message par jour au premier calcul après 7 h (heure de Paris), le tout
+  premier tout de suite pour vérifier, puis une alerte quand un ticket suivi est gagné ou perdu.
 """
 import html
 from datetime import datetime
@@ -53,6 +54,53 @@ def message(tk, url):
     out.append(f'<a href="{e(url)}">Ouvrir l\'appli</a>')
     out.append("<i>Probabilités, pas certitudes : joue petit.</i>")
     return "\n".join(out)
+
+
+def id_message(chat_id):
+    return (f"👋 Salut ! Ton identifiant Telegram est : <code>{int(chat_id)}</code>\n\n"
+            "Pour recevoir tes pronos ici, ajoute-le sur GitHub : ton dépôt → Settings → Secrets and variables → "
+            "Actions → New repository secret. Nom : <b>TELEGRAM_CHAT_ID</b>, valeur : le nombre ci-dessus.\n\n"
+            "Ensuite tu auras les tickets chaque matin et une alerte quand un ticket suivi est gagné ou perdu.")
+
+
+def settled_message(tickets, formulas, url):
+    e = html.escape
+    out = ["<b>🔔 Tickets réglés</b>", ""]
+    for t in tickets:
+        fm = formulas.get(t.get("formula"), {})
+        name = f"{fm.get('emoji', '')} {fm.get('name', 'Ticket')}".strip()
+        if t["status"] == "won":
+            out.append(f"✅ <b>{e(name)} gagné</b> · cote {_n2(t.get('paid', t['odds']))}")
+        else:
+            out.append(f"❌ <b>{e(name)} perdu</b> · cote {_n2(t['odds'])}")
+        for l in t["legs"]:
+            r = l.get("result")
+            score = f"{r[0]}-{r[1]}" if r else "annulé"
+            out.append(f"   • {e(l['label'])} ({e(l['match'])}, {score})")
+        out.append("")
+    out.append(f'<a href="{e(url)}">Voir le suivi</a>')
+    return "\n".join(out)
+
+
+def get_updates(token, offset=None):
+    """Messages reçus par le bot (24 h max chez Telegram). Renvoie (liste ou None, détail sans le jeton)."""
+    params = {"timeout": 0, "allowed_updates": '["message"]'}
+    if offset:
+        params["offset"] = offset
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", params=params, timeout=20)
+    except requests.RequestException as ex:
+        return None, type(ex).__name__
+    if r.status_code != 200:
+        try:
+            desc = str(r.json().get("description", ""))[:80]
+        except ValueError:
+            desc = ""
+        return None, f"HTTP {r.status_code} {desc}".strip()
+    try:
+        return list(r.json().get("result", [])), "ok"
+    except ValueError:
+        return None, "réponse illisible"
 
 
 def send(token, chat_id, text):
