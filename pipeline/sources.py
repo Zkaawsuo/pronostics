@@ -172,7 +172,7 @@ def clubelo_ratings(day=None, quiet=False):
             break
     else:
         if not quiet:
-            log(f"ClubElo indisponible (HTTP {'/'.join(codes)}) : Elo neutre utilisé")
+            log(f"ClubElo indisponible (HTTP {'/'.join(codes)}) : Elo calculé par l'appli à la place")
         return {}
     ratings = {}
     for row in csv.DictReader(io.StringIO(r.text)):
