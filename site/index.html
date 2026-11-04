@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 <header class="top">
@@ -53,6 +53,13 @@
   <div id="tickets-track"></div>
 </main>
 
+<main id="view-infos" class="view">
+  <h2 class="title">Infos</h2>
+  <p class="lead">Touche un match pour voir la forme des deux équipes : derniers résultats par compétition, classement, confrontations.</p>
+  <div class="chips" id="info-chips"></div>
+  <div id="info-list"></div>
+</main>
+
 <main id="view-combo" class="view">
   <h2 class="title">Mes paris</h2>
   <div class="seg wide" id="mp-seg"></div>
@@ -73,6 +80,7 @@
 <nav class="tabs">
   <button data-view="matches" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.5h-5L8 10z"/></svg>Matchs</button>
   <button data-view="tickets"><svg viewBox="0 0 24 24"><path d="M3 8a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a2 2 0 0 0 0 4v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a2 2 0 0 0 0-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/></svg>Tickets</button>
+  <button data-view="infos"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>Infos</button>
   <button data-view="combo"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>Mes paris<span class="badge" id="combo-badge"></span></button>
   <button data-view="perf"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Fiabilité</button>
 </nav>
@@ -81,6 +89,6 @@
 <section class="sheet" id="sheet" aria-modal="true" role="dialog"></section>
 <div class="toast" id="toast"></div>
 
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

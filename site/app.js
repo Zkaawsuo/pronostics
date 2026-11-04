@@ -34,6 +34,7 @@ async function init() {
     [S.data, S.perf, S.meta, S.tickets, res] = await Promise.all([getJSON("data/matches.json"), getJSON("data/performance.json"),
       getJSON("data/meta.json").catch(() => null), getJSON("data/tickets.json").catch(() => null),
       getJSON("data/results.json").catch(() => null)]);
+    getJSON("data/teams.json").then((x) => { S.teams = x; renderInfos(); }).catch(() => {});
   } catch {
     $("#match-list").innerHTML = '<p class="empty">Pas encore de données. Le premier calcul automatique arrive dans quelques minutes.</p>';
     $("#updated").textContent = "En attente";
@@ -42,7 +43,7 @@ async function init() {
   }
   S.res = (res && res.results) || {};
   $("#updated").textContent = "Mis à jour " + relTime(S.data.generated);
-  renderChips(); renderHighlights(); renderMatches(); renderTickets(); renderMP(); renderPerf();
+  renderChips(); renderHighlights(); renderMatches(); renderTickets(); renderMP(); renderPerf(); renderInfos();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
@@ -311,6 +312,78 @@ function playerSVG(p, kit, uid) {   // maillot vu de face : couleurs, motif, éc
   </svg>`;
 }
 
+// ------------------------------------------------------------------ infos : forme des équipes
+S.icomp = "ALL";
+function renderInfos() {
+  if (!S.data || !$("#info-list")) return;
+  const present = [...new Set(S.data.matches.map((m) => m.comp))];
+  $("#info-chips").innerHTML = `<button class="chip all ${S.icomp === "ALL" ? "on" : ""}" data-k="ALL">Tout</button>` +
+    present.map((k) => { const v = S.data.competitions[k]; return `<button class="chip tlogo ${S.icomp === k ? "on" : ""}" data-k="${k}" aria-label="${esc(v.name)}">${v.logo ? `<img src="${esc(v.logo)}" alt="" class="${v.logo.startsWith("icons/") ? "full" : ""}">` : esc(v.flag)}</button>`; }).join("");
+  $("#info-chips").onclick = (e) => { const b = e.target.closest(".chip"); if (!b) return; S.icomp = b.dataset.k; renderInfos(); };
+  const list = S.data.matches.filter((m) => (S.icomp === "ALL" || m.comp === S.icomp) && new Date(m.date) > Date.now() - 2 * 3600e3);
+  let html = "", last = "";
+  for (const m of list) {
+    const d = new Date(m.date), dk = dayKey(d);
+    if (dk !== last) { last = dk; html += `<div class="day">${dayWord(d)} ${d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</div>`; }
+    html += `<button class="irow" data-key="${esc(m.key)}"><span class="cmeta">${compTag(m.comp)}</span>
+      <span class="iteams">${crest(m.home.crest, m.home.name)}<b>${esc(m.home.name)}</b><small>${hhmm(d)}</small><b>${esc(m.away.name)}</b>${crest(m.away.crest, m.away.name)}</span>
+      <span class="iform">${miniForm(m.home)}<i></i>${miniForm(m.away)}</span></button>`;
+  }
+  $("#info-list").innerHTML = html || '<p class="empty">Aucun match à venir.</p>';
+  $("#info-list").onclick = (e) => { const r = e.target.closest(".irow"); if (r) openDossier(r.dataset.key); };
+}
+const teamDoc = (t) => S.teams && S.teams.teams[t.crest || t.name];
+const resOf = (r) => (r.s[0] > r.s[1] ? "V" : r.s[0] === r.s[1] ? "N" : "D");
+function miniForm(t) {
+  const d = teamDoc(t); if (!d) return "<span class='src'>–</span>";
+  return d.rows.slice(0, 5).reverse().map((r) => `<span class="fb ${resOf(r)}">${resOf(r)}</span>`).join("");
+}
+function teamStats(rows) {
+  const n = rows.length; if (!n) return null;
+  const v = rows.filter((r) => r.s[0] > r.s[1]).length, nn = rows.filter((r) => r.s[0] === r.s[1]).length;
+  const gf = rows.reduce((a, r) => a + r.s[0], 0), ga = rows.reduce((a, r) => a + r.s[1], 0);
+  return { n, v, nn, d: n - v - nn, gf: gf / n, ga: ga / n, cs: rows.filter((r) => r.s[1] === 0).length,
+    o25: rows.filter((r) => r.s[0] + r.s[1] > 2.5).length, btts: rows.filter((r) => r.s[0] > 0 && r.s[1] > 0).length };
+}
+function openDossier(key) {
+  const m = S.data.matches.find((x) => x.key === key); if (!m) return;
+  const c = S.data.competitions[m.comp], d = new Date(m.date);
+  const side = (t) => {
+    const doc = teamDoc(t);
+    if (!doc) return `<div class="dteam"><p class="src">Pas d'historique dans nos sources pour cette équipe.</p></div>`;
+    const st = teamStats(doc.rows.slice(0, 10));
+    const pos = Object.entries(doc.pos || {}).map(([k, p]) => `<span class="dpos">${compTag(k)} <b>${p[0]}<sup>e</sup></b> · ${p[1]} pts · ${p[2]} m.</span>`).join("");
+    const comps = [...new Set(doc.rows.map((r) => r.c))];
+    const block = (k) => { const rows = doc.rows.filter((r) => r.c === k).slice(0, 5); return rows.length ? `<div class="dblock"><div class="dbh">${compTag(k, true)}</div>${rows.map(rowHTML).join("")}</div>` : ""; };
+    return `<div class="dteam">
+      <div class="dname">${crest(t.crest, t.name)}<b>${esc(t.name)}</b></div>
+      ${pos ? `<div class="dposs">${pos}</div>` : ""}
+      <div class="form">${doc.rows.slice(0, 5).reverse().map((r) => `<span class="fb ${resOf(r)}">${resOf(r)}</span>`).join("")}</div>
+      ${st ? `<div class="dstats"><span><b>${st.v}-${st.nn}-${st.d}</b>V-N-D</span><span><b>${dec(st.gf.toFixed(1))}</b>buts marqués</span><span><b>${dec(st.ga.toFixed(1))}</b>encaissés</span>
+        <span><b>${st.cs}</b>clean sheets</span><span><b>${Math.round(st.o25 / st.n * 100)} %</b>+2,5 buts</span><span><b>${Math.round(st.btts / st.n * 100)} %</b>2 marquent</span></div>
+        <p class="src">Sur les ${st.n} derniers matchs, toutes compétitions.</p>` : ""}
+      ${comps.map(block).join("")}
+    </div>`;
+  };
+  const rowHTML = (r) => `<div class="drow"><time>${new Date(r.d).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</time><span class="dv">${r.v === "D" ? "dom." : "ext."}</span>
+    ${crest(r.oc, r.o)}<span class="dop">${esc(r.o)}</span><b class="dsc ${resOf(r)}">${r.s[0]}-${r.s[1]}</b></div>`;
+  const h = (S.teams && S.teams.h2h[key]) || [];
+  $("#sheet").innerHTML = `<div class="sheet-top"><span></span><div class="grab"></div><button class="close" aria-label="Fermer">×</button></div>
+    <div class="meta"><span class="cmeta">${compTag(m.comp, true)}</span><span>${dayWord(d)} · ${hhmm(d)}</span></div>
+    <div class="dtabs"><button class="on" data-s="0">${esc(m.home.name)}</button><button data-s="1">${esc(m.away.name)}</button>${h.length ? '<button data-s="2">Face-à-face</button>' : ""}</div>
+    <div class="dpane" data-p="0">${side(m.home)}</div><div class="dpane" data-p="1" hidden>${side(m.away)}</div>
+    ${h.length ? `<div class="dpane" data-p="2" hidden><p class="src">Du point de vue de ${esc(m.home.name)}.</p>${h.map(rowHTML).join("")}</div>` : ""}
+    <button class="btn" id="dos-match">Voir le prono du match</button>`;
+  $("#sheet").onclick = (e) => {
+    if (e.target.closest(".close")) { closeSheet(); return; }
+    if (e.target.id === "dos-match") { openSheet(key); return; }
+    const t = e.target.closest(".dtabs button"); if (!t) return;
+    $("#sheet").querySelectorAll(".dtabs button").forEach((b) => b.classList.toggle("on", b === t));
+    $("#sheet").querySelectorAll(".dpane").forEach((p) => (p.hidden = p.dataset.p !== t.dataset.s));
+  };
+  showSheet();
+}
+
 // ------------------------------------------------------------------ fiche
 function showSheet() { $("#sheet").classList.add("on"); $("#sheet-bg").classList.add("on"); $("#sheet").scrollTop = 0; }
 
@@ -334,6 +407,7 @@ function openSheet(key) {
     </div>
     ${bar(f, m.pick)}
 
+    <button class="btn dos" data-dos="${esc(m.key)}">📋 Forme des équipes et derniers matchs</button>
     <h3>L'analyse</h3>
     <ul class="why">${m.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
     ${m.quality.map((q) => `<p class="note">⚠ ${esc(q)}</p>`).join("")}
@@ -378,6 +452,7 @@ function openSheet(key) {
     ${disclaimer()}`;
   $("#sheet").onclick = (e) => {
     if (e.target.closest(".close")) { closeSheet(); return; }
+    const dos = e.target.closest("[data-dos]"); if (dos) { openDossier(dos.dataset.dos); return; }
     const b = e.target.closest(".add"); if (!b) return;
     toggleCombo(m, b.dataset.sel); b.classList.toggle("in");
   };

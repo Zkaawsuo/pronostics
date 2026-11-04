@@ -957,6 +957,44 @@ save("meta.json", {"generated": NOW.isoformat(), "warnings": S.LOG[-30:],
                              "home_adv": {k: round(math.exp(m.home_adv), 3) for k, m in models.items()}}})
 save("history.json", history)
 # scores des 60 derniers jours, compacts : l'appli s'en sert pour régler « Mes paris » sur ton téléphone
+# dossiers d'équipes : derniers matchs par compétition, classement, confrontations directes
+season_from = datetime(season, 7, 1, tzinfo=timezone.utc)
+team_rows, tables = defaultdict(list), {}
+for code, rows in fd_matches.items():
+    table = defaultdict(lambda: [0, 0, 0, 0])   # points, joués, diff, buts
+    for m in rows:
+        if m["status"] != "FINISHED" or m["hg"] is None:
+            continue
+        for side, other in (("home", "away"), ("away", "home")):
+            gf, ga = (m["hg"], m["ag"]) if side == "home" else (m["ag"], m["hg"])
+            team_rows[m[side + "_crest"] or m[side + "_short"]].append(
+                {"c": code, "d": m["date"][:10], "o": m[other + "_short"], "oc": m[other + "_crest"],
+                 "v": "D" if side == "home" else "E", "s": [gf, ga]})
+            if C.COMPETITIONS[code]["domestic"] and dt(m["date"]) >= season_from:
+                t = table[m[side + "_crest"] or m[side + "_short"]]
+                t[0] += 3 if gf > ga else 1 if gf == ga else 0
+                t[1] += 1; t[2] += gf - ga; t[3] += gf
+    if table:
+        ranked = sorted(table.items(), key=lambda kv: (-kv[1][0], -kv[1][2], -kv[1][3]))
+        tables[code] = {tid: [i + 1, v[0], v[1], len(ranked)] for i, (tid, v) in enumerate(ranked)}
+dossiers, h2h = {}, {}
+for c in cards:
+    ids = []
+    for side in ("home", "away"):
+        tid = c[side].get("crest") or c[side]["name"]
+        ids.append(tid)
+        if tid in dossiers or tid not in team_rows:
+            continue
+        rows = sorted(team_rows[tid], key=lambda r: r["d"], reverse=True)
+        dossiers[tid] = {"rows": rows[:24],
+                         "pos": {code: t[tid] for code, t in tables.items() if tid in t}}
+    a, b = ids
+    if a in team_rows:
+        h = [r for r in team_rows[a] if r["oc"] and r["oc"] == b]
+        if h:
+            h2h[c["key"]] = sorted(h, key=lambda r: r["d"], reverse=True)[:6]
+save("teams.json", {"generated": NOW.isoformat(), "teams": dossiers, "h2h": h2h})
+
 save("results.json", {"generated": NOW.isoformat(),
                       "results": {k: h["result"] for k, h in history.items()
                                   if h.get("result") and (NOW - dt(h["date"])).days <= 60}})
