@@ -116,20 +116,21 @@ function cardHTML(m) {
   const time = new Date(m.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   const confTxt = ["", "Incertain", "Moyen", "Fort"][m.confidence];
   const gap = m.market && Math.abs(m.model.home - m.market.home) >= 0.08;
+  const want = S.book || "Betclic";
+  const bk = (m.books || []).find((x) => x.book === want) || (m.books || [])[0];
+  const btn = (k, lbl, side) => `<div class="ob ${m.pick === k ? "pick" : ""}"><span class="ol">${lbl}</span><b>${bk && bk[side] ? n2(bk[side]) : "–"}</b><small>${pct(f[k])}</small></div>`;
   return `<article class="card" data-key="${esc(m.key)}">
-    <div class="meta"><span>${c.flag} ${esc(c.name)}</span><span>${time}</span></div>
-    <div class="teams">
-      <div class="team">${crest(m.home.crest, m.home.name)}<span>${esc(m.home.name)}</span></div>
-      <div class="score-guess">${esc((m.pick_score || m.scores[0]).score)}</div>
-      <div class="team r">${crest(m.away.crest, m.away.name)}<span>${esc(m.away.name)}</span></div>
+    <div class="meta"><span>${c.flag} ${esc(c.name)} · ${time}</span><span class="conf conf${m.confidence}">${confTxt}</span></div>
+    <div class="vs">
+      <div class="vteam">${crest(m.home.crest, m.home.name)}<span>${esc(m.home.name)}</span></div>
+      <div class="vteam">${crest(m.away.crest, m.away.name)}<span>${esc(m.away.name)}</span></div>
+      <div class="vscore"><b>${esc((m.pick_score || m.scores[0]).score)}</b><small>score prono</small></div>
     </div>
-    ${bar(f, m.pick)}
-    <div class="bar-legend"><span>1</span><span>N</span><span>2</span></div>
+    <div class="odds">${btn("home", "1", "h")}${btn("draw", "N", "d")}${btn("away", "2", "a")}</div>
     <div class="tags">
-      <span class="tag conf${m.confidence}">● ${confTxt}</span>
       <span class="tag">+2,5 <b>${pct(f["over_2.5"])}</b></span>
-      <span class="tag">BTTS <b>${pct(f.btts)}</b></span>
-      ${m.best_odds ? `<span class="tag">Cote ${m.pick === "home" ? "1" : m.pick === "draw" ? "N" : "2"} <b>${n2(m.best_odds[m.pick[0]].odd)}</b></span>` : ""}
+      <span class="tag">Les 2 marquent <b>${pct(f.btts)}</b></span>
+      ${bk ? `<span class="tag">${esc(bk.book)}</span>` : '<span class="tag">Pas de cotes</span>'}
       ${gap ? '<span class="tag gap">Écart modèle / marché</span>' : ""}
     </div>
   </article>`;
@@ -222,11 +223,13 @@ function renderTickets() {
   $("#book-chips").innerHTML = T.books.map((b) => `<button class="chip ${b === S.book ? "on" : ""}" data-b="${esc(b)}">${esc(b)}</button>`).join("");
   $("#book-chips").onclick = (e) => {
     const c = e.target.closest(".chip"); if (!c) return;
-    S.book = c.dataset.b; store.set("book", S.book); renderTickets();
+    S.book = c.dataset.b; store.set("book", S.book); renderTickets(); renderMatches();
   };
-  const comps = (T.comps || []).filter((c) => S.data && S.data.competitions[c]);
+  const groups = T.groups || {};
+  const comps = (T.comps || []).filter((c) => groups[c] || (S.data && S.data.competitions[c]));
   if (S.tcomp !== "ALL" && !comps.includes(S.tcomp)) S.tcomp = "ALL";
-  $("#tcomp-chips").innerHTML = [["ALL", "Toutes compétitions"]].concat(comps.map((c) => [c, `${S.data.competitions[c].flag} ${S.data.competitions[c].name}`]))
+  const clabel = (c) => (groups[c] ? groups[c].name : `${S.data.competitions[c].flag} ${S.data.competitions[c].name}`);
+  $("#tcomp-chips").innerHTML = [["ALL", "🌍 Toutes compétitions"]].concat(comps.map((c) => [c, clabel(c)]))
     .map(([k, l]) => `<button class="chip small ${S.tcomp === k ? "on" : ""}" data-c="${k}">${esc(l)}</button>`).join("");
   $("#tcomp-chips").onclick = (e) => {
     const c = e.target.closest(".chip"); if (!c) return;
@@ -278,27 +281,32 @@ function buteursHTML() {
 }
 
 function ticketHTML(fid, fm, t) {
-  const head = (odds) => `<header><span class="tname">${fm.emoji} ${esc(fm.name)}</span>${odds ? `<span class="todds">${n2(odds)}</span>` : ""}</header><p class="tpitch">${esc(fm.pitch)}</p>`;
-  if (!t) return `<article class="ticket t-${fid}">${head()}<p class="src">Pas de combinaison crédible dans cette fourchette de cote avec les matchs à venir chez ${esc(S.book)}.</p></article>`;
+  const head = (kind) => `<header class="thead"><span class="tname">${fm.emoji} ${esc(fm.name)}</span><span class="tkind">${kind || ""}</span></header><p class="tpitch">${esc(fm.pitch)}</p>`;
+  if (!t) return `<article class="ticket t-${fid}">${head()}<p class="src tnone">Pas de ticket crédible dans cette fourchette avec les matchs à venir chez ${esc(S.book)}.</p></article>`;
   const now = Date.now();
   const started = t.legs.some((l) => new Date(l.date) <= now);
   const stake = parseFloat(String(S.stake).replace(",", ".")) || 0;
   const flag = (c) => (S.data && S.data.competitions[c] ? S.data.competitions[c].flag : "");
-  const legs = t.legs.map((l) => `<li class="${new Date(l.date) <= now ? "past" : ""}">
-      <div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span><small>${flag(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)}</small></div></div>
-      <div class="lright"><b>${l.est ? "≈" : ""}${n2(l.odd)}</b><small>${pct(l.p)}</small></div></li>`).join("");
+  const kind = t.legs.length === 1 ? "Simple" : `Combiné (${t.legs.length})`;
+  const legs = t.legs.map((l) => `<li class="leg ${new Date(l.date) <= now ? "past" : ""}">
+      <div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span><small>${flag(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)} · ${pct(l.p)}</small></div></div>
+      <span class="obadge">${l.est ? "≈" : ""}${n2(l.odd)}</span></li>`).join("");
   const ev = Math.round(t.ev * 100);
-  return `<article class="ticket t-${fid}">${head(t.odds)}
+  return `<article class="ticket t-${fid}">${head(kind)}
+    <ul class="legs">${legs}</ul>
+    <div class="slip">
+      <div><span>Cote totale</span><span class="obadge big">${n2(t.odds)}</span></div>
+      <div><span>Mise</span><b>${stake ? euro(stake) : "–"}</b></div>
+      <div><span>Gains possibles</span><b class="gain">${stake ? euro(stake * t.odds) : "–"}</b></div>
+    </div>
     <div class="tstats">
       <div><b>${pct(t.p)}</b><small>de chances</small></div>
       <div><b>1 sur ${Math.max(1, Math.round(1 / t.p))}</b><small>passe environ</small></div>
       <div><b class="${ev >= 0 ? "pos" : "neg"}">${ev >= 0 ? "+" : ""}${ev} %</b><small>rendement moyen</small></div>
     </div>
-    <ul class="legs">${legs}</ul>
     ${started ? '<p class="note">⚠ Un match a déjà commencé : ce ticket n\'est plus jouable tel quel. Il sera remplacé au prochain calcul.</p>' : ""}
     ${t.window_h > 48 ? `<p class="src">${t.window_h > 100 ? "Construit avec les matchs de la semaine (rien de jouable dans les 4 prochains jours)." : "Pas assez de matchs dans les 48 h : ticket élargi aux 4 prochains jours."}</p>` : ""}
-    <div class="tfoot"><span class="src">${stake ? `${euro(stake)} → <b>${euro(stake * t.odds)}</b> si ça passe` : "Indique une mise"}</span>
-      <button class="copy" data-f="${fid}">Copier</button></div>
+    <button class="copy" data-f="${fid}">Copier le ticket</button>
   </article>`;
 }
 

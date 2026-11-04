@@ -14,6 +14,7 @@ import numpy as np
 
 import config as C
 import sources as S
+import notify as N
 import tickets as T
 from build_utils import dt
 from model import DixonColes, combos, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, scorer_prob, shots_coefs
@@ -824,6 +825,20 @@ live["over25_hit"] = round(float(np.mean(o25)), 3) if o25 else None
 
 weights = {"market": MKT_W, "xg": XG_W, "xi": XI, "elo": ELO_W, "tuned_at": tuned.get("at"),
            "market_tuned": "market_weight" in tuned}
+
+# ======================================================================== 12b. Telegram (1 message par jour)
+if C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
+    paris = NOW.astimezone(N.PARIS)
+    today = paris.strftime("%Y-%m-%d")
+    first = "telegram_day" not in state            # tout premier envoi : tout de suite, pour tester
+    if state.get("telegram_day") != today and (first or paris.hour >= 7):
+        repo = os.getenv("GITHUB_REPOSITORY", "Zkaawsuo/pronostics").split("/")
+        url = f"https://{repo[0].lower()}.github.io/{repo[-1]}/"
+        ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.message(tk, url))
+        if ok:
+            state["telegram_day"] = today
+        else:
+            S.log(f"Telegram : message non envoyé ({detail}). As-tu bien écrit /start à ton bot ?")
 
 # ======================================================================== 13. écriture
 save("matches.json", {"generated": NOW.isoformat(), "matches": cards, "weights": weights,

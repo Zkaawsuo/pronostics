@@ -5,6 +5,8 @@ import os
 FD_KEY = os.getenv("FD_KEY", "").strip()          # football-data.org
 AF_KEY = os.getenv("AF_KEY", "").strip()          # api-football (blessures)
 ODDS_KEY = os.getenv("ODDS_KEY", "").strip()      # the-odds-api.com (cotes)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()      # bot Telegram (facultatif)
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()  # ton identifiant Telegram
 
 # code interne -> infos par source
 COMPETITIONS = {

@@ -4,7 +4,7 @@ import unicodedata
 from difflib import SequenceMatcher
 
 STOP = {"fc", "cf", "afc", "ac", "as", "sc", "ssc", "us", "ss", "club", "calcio", "bc", "rc", "ogc",
-        "vfl", "vfb", "tsg", "sv", "fsv", "1", "cd", "ud", "sd", "rcd", "ca", "de", "del", "la", "le", "sfp",
+        "vfl", "vfb", "tsg", "sv", "fsv", "1", "cd", "ud", "sd", "rcd", "ca", "de", "del", "la", "le", "sfp", "pae",
         "the", "and", "1899", "1846", "1907", "1909", "1910", "1913", "04", "05", "96", "hsc", "losc", "fk"}
 
 # formes longues -> forme courte commune
@@ -68,7 +68,11 @@ ALIASES = {
     "ath madrid": "atletico", "ath bilbao": "bilbao", "espanol": "espanyol", "vallecano": "rayo",
     "ein frankfurt": "frankfurt", "la coruna": "coruna", "deportivo coruna": "coruna", "rc deportivo": "coruna", "sp gijon": "sporting gijon",
     "sporting cp": "sporting", "sporting clube de portugal": "sporting", "sporting clube portugal": "sporting",
-    "sporting braga": "braga", "sc braga": "braga", "glasgow rangers": "rangers", "celtic glasgow": "celtic", "sporting lisbon": "sporting", "sl benfica": "benfica",
+    "sporting braga": "braga", "sc braga": "braga", "glasgow rangers": "rangers",
+    "aek athens": "aek", "aek athens fc": "aek", "aek athenes": "aek", "paok thessaloniki": "paok",
+    "union saint gilloise": "union sg", "royale union saint gilloise": "union sg", "union st gilloise": "union sg",
+    "red star belgrade": "crvena zvezda", "etoile rouge de belgrade": "crvena zvezda",
+    "olympiacos": "olympiakos", "olympiacos piraeus": "olympiakos", "olympiakos piraeus": "olympiakos", "celtic glasgow": "celtic", "sporting lisbon": "sporting", "sl benfica": "benfica",
     "fc porto": "porto", "psv eindhoven": "psv", "afc ajax": "ajax", "feyenoord rotterdam": "feyenoord",
     "club brugge kv": "brugge", "club brugge": "brugge", "celtic fc": "celtic", "rangers fc": "rangers",
     "galatasaray sk": "galatasaray", "fenerbahce sk": "fenerbahce", "red bull salzburg": "salzburg",

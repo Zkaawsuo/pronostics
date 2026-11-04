@@ -13,7 +13,7 @@ import config
 # Robot identifié honnêtement, au format standard des robots (avec une adresse de contact).
 UA = {"User-Agent": "Mozilla/5.0 (compatible; pronostics-perso/2.0; +https://github.com/Zkaawsuo/pronostics)"}
 LOG = []  # avertissements remontés dans l'app (meta.json, PUBLIC : jamais de clé dedans)
-_SECRETS = [k for k in (config.FD_KEY, config.AF_KEY, config.ODDS_KEY) if len(k) >= 8]
+_SECRETS = [k for k in (config.FD_KEY, config.AF_KEY, config.ODDS_KEY, config.TELEGRAM_TOKEN) if len(k) >= 8]
 
 
 def log(msg):

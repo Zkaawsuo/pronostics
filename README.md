@@ -43,6 +43,15 @@ Chaque ticket est figé au coup d'envoi de son 1er match puis réglé : le bilan
 Tickets spéciaux par compétition (LDC, Ligue 1...) : mêmes règles, sur les matchs de la compétition,
 jusqu'à la semaine si rien n'est jouable dans les 4 jours.
 
+## Telegram (facultatif)
+
+Chaque matin vers 7 h 30, les 3 tickets, les combis et les buteurs du jour arrivent sur Telegram.
+1. Sur Telegram, écris à @BotFather → /newbot → choisis un nom → il te donne un jeton.
+2. Écris /start à ton nouveau bot (sinon il n'a pas le droit de t'écrire).
+3. Écris /start à @userinfobot : il te répond ton identifiant (Id).
+4. Ajoute 2 secrets GitHub : `TELEGRAM_TOKEN` (le jeton) et `TELEGRAM_CHAT_ID` (l'identifiant).
+Le premier message part au calcul suivant, pour vérifier que tout marche.
+
 ## Combis du match (type MyCombi)
 
 Pour chaque match, la matrice de scores donne la vraie chance de deux paris liés

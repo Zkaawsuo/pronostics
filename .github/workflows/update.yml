@@ -41,6 +41,8 @@ jobs:
           FD_KEY: ${{ secrets.FD_KEY }}
           AF_KEY: ${{ secrets.AF_KEY }}
           ODDS_KEY: ${{ secrets.ODDS_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python pipeline/build.py
 
       - name: Vérifier qu'aucune clé ne fuit
@@ -48,8 +50,9 @@ jobs:
           FD_KEY: ${{ secrets.FD_KEY }}
           AF_KEY: ${{ secrets.AF_KEY }}
           ODDS_KEY: ${{ secrets.ODDS_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         run: |
-          for k in "$FD_KEY" "$AF_KEY" "$ODDS_KEY"; do
+          for k in "$FD_KEY" "$AF_KEY" "$ODDS_KEY" "$TELEGRAM_TOKEN"; do
             k=$(printf '%s' "$k" | tr -d '[:space:]')
             if [ -n "$k" ] && grep -rqF -- "$k" site/; then
               echo "::error::Une clé API a été trouvée dans les fichiers du site : publication annulée."

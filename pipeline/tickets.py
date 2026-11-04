@@ -24,6 +24,9 @@ FORMULAS = {
                   "pitch": "Meilleur rendement, avec uniquement des sélections crédibles."},
 }
 
+GROUPS = {"EUR": ["CL", "EL"]}
+GROUPS_LABEL = {"EUR": "🏆 LDC + Europa"}
+
 LABELS = {"home": "{h} gagne", "draw": "Match nul", "away": "{a} gagne", "1N": "{h} ou nul",
           "N2": "Nul ou {a}", "12": "Pas de match nul", "over": "Plus de 2,5 buts", "under": "Moins de 2,5 buts"}
 
@@ -131,15 +134,23 @@ def search(cands, fm, per_bucket=6, width=0.04):
 
 
 def _formulas(cards, book, now, windows):
-    res = {}
+    """Les 3 formules ; chacune évite si possible les sélections déjà prises par les précédentes,
+    pour proposer 3 tickets vraiment différents (sinon on accepte de les réutiliser)."""
+    res, used = {}, set()
     for fid, fm in FORMULAS.items():
         t = None
         for win in windows:
-            t = search(candidates(cards, book, now, win), fm)
+            cands = candidates(cards, book, now, win)
+            fresh = [c for c in cands if (c["key"], c["sel"]) not in used]
+            t_new, t_all = search(fresh, fm), search(cands, fm)
+            # on varie seulement si ça coûte peu (moins de 4 points de rendement moyen)
+            t = t_new if t_new and (not t_all or t_new["ev"] >= t_all["ev"] - 0.04) else t_all
             if t:
                 t["window_h"] = win
                 break
         res[fid] = t
+        if t:
+            used |= {(l["key"], l["sel"]) for l in t["legs"]}
     return res
 
 
@@ -198,10 +209,15 @@ def build_all(cards, now):
     for book in order:
         by_book[book] = _formulas(cards, book, now, (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2))
         # tickets spéciaux par compétition : on va chercher jusqu'à la semaine si besoin (ex. LDC le week-end)
-        by_comp[book] = {comp: _formulas([c for c in cards if c["comp"] == comp], book, now,
-                                         (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2, C.HORIZON_DAYS * 24))
-                         for comp in comps}
-    return {"books": order, "coverage": books, "by_book": by_book, "by_comp": by_comp, "comps": comps,
+        wins = (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2, C.HORIZON_DAYS * 24)
+        by_comp[book] = {comp: _formulas([c for c in cards if c["comp"] == comp], book, now, wins) for comp in comps}
+        for gid, members in GROUPS.items():   # tickets mixant plusieurs compétitions (ex. LDC + Europa)
+            sub = [c for c in cards if c["comp"] in members]
+            if sub:
+                by_comp[book][gid] = _formulas(sub, book, now, wins)
+    groups = [g for g, members in GROUPS.items() if any(c["comp"] in members for c in cards)]
+    return {"books": order, "coverage": books, "by_book": by_book, "by_comp": by_comp, "comps": groups + comps,
+            "groups": {g: {"name": GROUPS_LABEL[g], "members": GROUPS[g]} for g in groups},
             "combis": combis_du_jour(cards, now), "buteurs": buteurs_du_jour(cards, now),
             "formulas": {k: {kk: vv for kk, vv in v.items() if kk != "band"} | {"band": list(v["band"])}
                          for k, v in FORMULAS.items()}}
