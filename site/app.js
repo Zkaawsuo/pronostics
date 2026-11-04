@@ -83,9 +83,16 @@ function bindUI() {
 function renderChips() {
   const comps = S.data.competitions;
   const present = new Set(S.data.matches.map((m) => m.comp));
-  const items = [["ALL", "Tout"]].concat(Object.entries(comps).filter(([k]) => present.has(k)).map(([k, v]) => [k, `${v.flag} ${v.name}`]));
   if (S.comp !== "ALL" && !present.has(S.comp)) S.comp = "ALL";
-  $("#comp-chips").innerHTML = items.map(([k, l]) => `<button class="chip ${S.comp === k ? "on" : ""}" data-k="${k}">${esc(l)}</button>`).join("");
+  const chip = ([k, v]) => {
+    const on = S.comp === k ? "on" : "";
+    if (!v.logo) return `<button class="chip ${on}" data-k="${k}">${esc(v.flag + " " + v.name)}</button>`;
+    const dark = v.logo.startsWith("icons/") ? "dark" : "";
+    return `<button class="chip logo ${dark} ${on}" data-k="${k}" aria-label="${esc(v.name)}" title="${esc(v.name)}">
+      <img src="${esc(v.logo)}" alt="" onerror="this.parentNode.classList.add('nologo');this.replaceWith(document.createTextNode('${esc(v.flag + " " + v.name).replace(/'/g, "")}'))"></button>`;
+  };
+  $("#comp-chips").innerHTML = `<button class="chip all ${S.comp === "ALL" ? "on" : ""}" data-k="ALL">Tout</button>` +
+    Object.entries(comps).filter(([k]) => present.has(k)).map(chip).join("");
   $("#comp-chips").onclick = (e) => {
     const b = e.target.closest(".chip"); if (!b) return;
     S.comp = b.dataset.k; store.set("comp", S.comp); renderChips(); renderHighlights(); renderMatches();
@@ -189,7 +196,7 @@ function topScorers() {
         if (seen.has(s.side)) continue;
         seen.add(s.side);
         const opp = s.side === "home" ? m.away : m.home;
-        out.push({ ...s, key: m.key, date: m.date, team: m[s.side].name, crest: m[s.side].crest, opp: opp.name });
+        out.push({ ...s, key: m.key, date: m.date, team: m[s.side].name, crest: m[s.side].crest, kit: m[s.side].kit, opp: opp.name });
       }
     }
     if (out.length >= 3) break;
@@ -217,20 +224,89 @@ function renderHighlights() {
     </article>`;
   };
   const scard = (p, i) => {
-    const d = new Date(p.date);
+    const d = new Date(p.date), kit = kitOf(p.kit);
     return `<article class="scard" data-key="${esc(p.key)}">
-      ${ghost(p.crest, "gs")}
-      <span class="srank">#${i + 1}</span>${crest(p.crest, p.team, "screst")}
-      <b class="sname">${esc(p.name)}</b>
-      <small class="steam">${esc(p.team)}${p.goals != null ? ` · ${p.goals} but${p.goals > 1 ? "s" : ""}` : ""}</small>
-      <div class="sp"><b>${pct(p.p)}</b><small>de marquer</small></div>
-      <div class="sfair">cote juste <b>${n2(p.fair)}</b></div>
-      <small class="swhen">contre ${esc(p.opp)} · ${dayWord(d)} ${hhmm(d)}</small>
+      <div class="sart" style="--k:${shade(kit.c[0], -0.35)}">
+        ${ghost(p.crest, "gs")}${playerSVG(p, kit, "s" + i)}
+        <span class="srank">#${i + 1}</span>${crest(p.crest, p.team, "screst")}
+      </div>
+      <div class="sinfo">
+        <b class="sname">${esc(p.name)}</b>
+        <small class="steam">${esc(p.team)}${p.goals != null ? ` · ${p.goals} but${p.goals > 1 ? "s" : ""}` : ""}</small>
+        <div class="sp"><b>${pct(p.p)}</b><small>de marquer</small></div>
+        <div class="sfair">cote juste <b>${n2(p.fair)}</b></div>
+        <small class="swhen">contre ${esc(p.opp)} · ${dayWord(d)} ${hhmm(d)}</small>
+      </div>
     </article>`;
   };
   el.innerHTML = (tops.length ? `<div class="hl-head"><h3>À la une</h3></div><div class="rail">${tops.map(hero).join("")}</div>` : "") +
     (sc.length ? `<div class="hl-head"><h3>Top buteurs</h3><span>chance de marquer, s'il joue</span></div><div class="rail">${sc.map(scard).join("")}</div>` : "");
   el.onclick = (e) => { const c = e.target.closest("[data-key]"); if (c) openSheet(c.dataset.key); };
+}
+
+// ------------------------------------------------------------------ silhouettes de buteurs (maillot, nom, numéro : aucun trait physique)
+const kitOf = (k) => (k && k.c && k.c.length ? { p: k.p || "plain", c: k.c.concat(k.c).slice(0, 3) } : { p: "plain", c: ["#3a4470", "#f4f4f6", "#f4f4f6"] });
+function lum(hex) {
+  const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f));
+  return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+const POSES = [   // épaule, coude, main : bras levés, un bras au ciel, avion
+  [[[64, 104], [42, 66], [30, 30]], [[136, 104], [158, 66], [170, 30]]],
+  [[[64, 106], [54, 146], [50, 184]], [[136, 104], [154, 64], [164, 24]]],
+  [[[62, 106], [32, 98], [8, 86]], [[138, 106], [168, 98], [192, 86]]],
+];
+function hashStr(s) { let h = 7; for (const ch of String(s)) h = (h * 31 + ch.codePointAt(0)) >>> 0; return h; }
+function playerSVG(p, kit, uid) {
+  const [c0, c1, c2] = kit.c, body = "#0b0f1f";
+  const ink = lum(c0) > 0.45 ? shade(c0, -0.6) : shade(c0, -0.55);
+  const txt = kit.p === "plain" || kit.p === "sleeves" || kit.p === "chest" ? (lum(c0) > 0.45 ? (lum(c1) < 0.3 ? c1 : "#15151a") : (lum(c1) > 0.5 ? c1 : "#ffffff"))
+    : (lum(c0) + lum(c1) > 0.9 ? "#15151a" : "#ffffff");
+  const outline = lum(txt) > 0.5 ? "#15151a" : "#ffffff";
+  const pose = POSES[hashStr(p.name) % POSES.length];
+  const torso = "M62 94 Q100 84 138 94 L144 130 Q148 172 142 214 L58 214 Q52 172 56 130 Z";
+  const layer = {
+    plain: "",
+    stripes: [70, 94, 118, 142].map((x) => `<rect x="${x}" y="80" width="12" height="140" fill="${c1}"/>`).join(""),
+    hoops: [104, 134, 164, 194].map((y) => `<rect x="40" y="${y}" width="120" height="15" fill="${c1}"/>`).join(""),
+    halves: `<rect x="100" y="80" width="60" height="140" fill="${c1}"/>`,
+    diag: `<polygon points="40,220 160,80 160,220" fill="${c1}"/>`,
+    band: `<rect x="84" y="80" width="32" height="140" fill="${c2}"/><rect x="89" y="80" width="22" height="140" fill="${c1}"/>`,
+    sash: `<polygon points="52,96 70,90 150,200 132,214" fill="${c1}"/>`,
+    chest: `<rect x="40" y="110" width="120" height="18" fill="${c1}"/>`,
+    sleeves: "",
+  }[kit.p] || "";
+  const sleeveCol = (side) => (kit.p === "sleeves" ? c1 : kit.p === "halves" && side ? c1 : c0);
+  const sleeve = ([s, e], side) => {
+    const dx = e[0] - s[0], dy = e[1] - s[1], L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, px = -uy, py = ux;
+    const m = [s[0] + ux * L * 0.5, s[1] + uy * L * 0.5];
+    const pts = [[s[0] + px * 15 - ux * 6, s[1] + py * 15 - uy * 6], [m[0] + px * 12, m[1] + py * 12], [m[0] - px * 12, m[1] - py * 12], [s[0] - px * 15 - ux * 6, s[1] - py * 15 - uy * 6]];
+    return `<polygon points="${pts.map((q) => q.map((v) => v.toFixed(1)).join(",")).join(" ")}" fill="${sleeveCol(side)}" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>`;
+  };
+  const arm = (a) => `<path d="M${a[0]} L${a[1]} L${a[2]}" fill="none" stroke="${body}" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${a[2][0]}" cy="${a[2][1]}" r="10.5" fill="${body}"/>`;
+  const name = (p.last || p.name.split(" ").slice(-1)[0] || "").toUpperCase();
+  const fs = name.length <= 7 ? 15 : name.length <= 10 ? 13 : 11;
+  const fl = pose[0];
+  const fx = fl[0][0] + (fl[1][0] - fl[0][0]) * 0.3, fy = fl[0][1] + (fl[1][1] - fl[0][1]) * 0.3;
+  return `<svg class="ssil" viewBox="0 0 200 214" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
+    <defs><clipPath id="${uid}t"><path d="${torso}"/></clipPath>
+      <linearGradient id="${uid}sh" x1="0" x2="1"><stop offset="0" stop-color="#000" stop-opacity=".3"/><stop offset=".35" stop-color="#000" stop-opacity="0"/>
+      <stop offset=".7" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".32"/></linearGradient>
+      <path id="${uid}arc" d="M64 132 Q100 119 136 132"/></defs>
+    ${arm(pose[0])}${arm(pose[1])}
+    <ellipse cx="100" cy="60" rx="21" ry="25" fill="${body}" stroke="rgba(255,255,255,.28)" stroke-width="1.5"/>
+    <rect x="90" y="76" width="20" height="20" fill="${body}"/>
+    ${sleeve(pose[0], 0)}${sleeve(pose[1], 1)}
+    <g clip-path="url(#${uid}t)"><rect x="40" y="80" width="120" height="140" fill="${c0}"/>${layer}<rect x="40" y="80" width="120" height="140" fill="url(#${uid}sh)"/></g>
+    <path d="${torso}" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M88 90 Q100 97 112 90" fill="none" stroke="${kit.p === "plain" ? c1 : txt}" stroke-width="3" stroke-linecap="round"/>
+    <text font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="${fs}" letter-spacing="1.2" fill="${txt}" stroke="${outline}" stroke-width="${kit.p === "plain" ? 0 : 2.4}" paint-order="stroke"><textPath href="#${uid}arc" startOffset="50%" text-anchor="middle">${esc(name)}</textPath></text>
+    ${p.num ? `<text x="100" y="200" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="66" fill="${txt}" stroke="${outline}" stroke-width="${kit.p === "plain" ? 1.5 : 3}" paint-order="stroke">${esc(p.num)}</text>` : ""}
+    ${p.flag ? `<text x="${fx.toFixed(0)}" y="${(fy + 5).toFixed(0)}" font-size="13" text-anchor="middle">${p.flag}</text>` : ""}
+  </svg>`;
 }
 
 // ------------------------------------------------------------------ fiche

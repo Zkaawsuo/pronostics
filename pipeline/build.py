@@ -16,6 +16,7 @@ import config as C
 import sources as S
 import notify as N
 import tickets as T
+import kits as K
 from build_utils import dt
 from model import DixonColes, combos, devig, elo_rates, local_elo, markets_from_matrix, score_matrix, scorer_prob, shots_coefs
 from names import Matcher, norm
@@ -160,6 +161,33 @@ if C.FD_KEY and not any(fd_matches.values()):
     save("state.json", state)   # garde le délai avant de réessayer Understat
     raise SystemExit(0)
 
+# logos des compétitions (fournis avec les matchs) ; Europa et Conférence : images locales
+emblems = state.setdefault("emblems", {})
+for code, comp in C.COMPETITIONS.items():
+    if comp["fd"] and fd.emblems.get(comp["fd"]):
+        emblems[code] = fd.emblems[comp["fd"]]
+emblems.update({"EL": "icons/comp-EL.png", "ECL": "icons/comp-ECL.png"})
+
+# couleurs des clubs pour dessiner les maillots (1 fois par semaine, 6 requêtes)
+teams_state = state.get("teams") or {}
+if C.FD_KEY and (not teams_state.get("at") or (NOW - dt(teams_state["at"])).days >= 7):
+    colors = {}
+    for code, comp in C.COMPETITIONS.items():
+        if comp["fd"]:
+            for t in fd.teams(comp["fd"], season):
+                if t["colors"]:
+                    for nm in (t["short"], t["name"]):
+                        if nm:
+                            colors[norm(nm)] = t["colors"]
+    if colors:
+        teams_state = state["teams"] = {"at": NOW.isoformat(), "colors": colors}
+club_colors = teams_state.get("colors", {})
+
+
+def kit_of(name):
+    return K.kit_for(name, club_colors.get(norm(name), ""))
+
+
 # ======================================================================== 2. historique des équipes
 team_games = defaultdict(list)   # nom FD -> matchs joués (toutes compétitions FD)
 crests, shorts = {}, {}
@@ -190,7 +218,7 @@ elo_match = Matcher(elo.keys())
 # ======================================================================== 2b. buteurs (une fois par jour)
 MAXI = "https://www.maxifoot.fr/classement-buteur-europe-2{}.htm"
 sc_state = state.get("scorers") or {}
-if sc_state.get("v") != 2 or not sc_state.get("at") or (NOW - dt(sc_state["at"])).total_seconds() > 20 * 3600:
+if sc_state.get("v") != 3 or not sc_state.get("at") or (NOW - dt(sc_state["at"])).total_seconds() > 20 * 3600:
     cur, prev, src = [], [], None
     for code in ("PL", "PD", "SA", "BL1", "FL1", "CL"):       # source officielle d'abord
         r = fd.scorers(C.COMPETITIONS[code]["fd"], season)
@@ -206,7 +234,7 @@ if sc_state.get("v") != 2 or not sc_state.get("at") or (NOW - dt(sc_state["at"])
         cur = S.maxifoot_scorers(MAXI.format(""))
         prev = S.maxifoot_scorers(MAXI.format(f"-{season}")) if cur else []
         src = "maxifoot" if cur else None
-    sc_state = state["scorers"] = {"v": 2, "at": NOW.isoformat(), "src": src, "cur": cur, "prev": prev}
+    sc_state = state["scorers"] = {"v": 3, "at": NOW.isoformat(), "src": src, "cur": cur, "prev": prev}
 
 DOMESTIC_TEAMS = {m[x] for code, rows in fd_matches.items() if C.COMPETITIONS[code]["domestic"]
                   for m in rows for x in ("home", "away")}
@@ -232,6 +260,9 @@ def _agg(rows):
         if r.get("comp") == "CL" and team in DOMESTIC_TEAMS and k not in in_league:
             continue
         a = out.setdefault(k, {"name": r["player"], "team": team, "goals": 0, "matches": 0})
+        for f in ("number", "nat", "last"):
+            if r.get(f) and not a.get(f):
+                a[f] = r[f]
         a["goals"] += r["goals"]
         a["matches"] += r["matches"]
     return out
@@ -264,7 +295,8 @@ def scorers_for(team, lam_team, side):
     for a in lst:
         p = scorer_prob(a["goals"], a["matches"], lam_team / max(avg, 0.3), a["pg"], a["pm"])
         out.append({"name": nice_name(a["name"]), "side": side, "p": r3(p), "fair": round(1 / p, 2),
-                    "goals": a["goals"], "games": a["matches"]})
+                    "goals": a["goals"], "games": a["matches"], "num": a.get("number"),
+                    "last": nice_name(a.get("last") or a["name"].split()[-1]), "flag": K.flag(a.get("nat"))})
     return out
 
 
@@ -807,9 +839,9 @@ for u in upcoming:
 
     cards.append({
         "key": key, "comp": code, "date": u["date"],
-        "home": {"name": u["home_name"], "crest": u["home_crest"], "elo": elo_h and round(elo_h),
+        "home": {"name": u["home_name"], "crest": u["home_crest"], "elo": elo_h and round(elo_h), "kit": kit_of(u["home_name"]),
                  "form": ctx["form_home"], "xg": ctx["xg_home"], "rest": rh, "absences": abs_h},
-        "away": {"name": u["away_name"], "crest": u["away_crest"], "elo": elo_a and round(elo_a),
+        "away": {"name": u["away_name"], "crest": u["away_crest"], "elo": elo_a and round(elo_a), "kit": kit_of(u["away_name"]),
                  "form": ctx["form_away"], "xg": ctx["xg_away"], "rest": ra, "absences": abs_a},
         "xg": [round(lam, 2), round(mu, 2)],
         "model": {k: r3(v) for k, v in model_p.items() if k not in ("top_scores", "by_outcome")},
@@ -907,7 +939,8 @@ elif C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
 # ======================================================================== 13. écriture
 save("matches.json", {"generated": NOW.isoformat(), "matches": cards, "weights": weights,
                       "xg_source": "tirs" if "tirs" in xg_source.values() else ("understat" if xg_source else None),
-                      "competitions": {k: {"name": v["name"], "flag": v["flag"]} for k, v in C.COMPETITIONS.items()}})
+                      "competitions": {k: {"name": v["name"], "flag": v["flag"], "logo": emblems.get(k)}
+                                       for k, v in C.COMPETITIONS.items()}})
 save("tickets.json", tk)
 save("performance.json", {"generated": NOW.isoformat(), "live": live, "backtest": bt, "weights": weights})
 save("meta.json", {"generated": NOW.isoformat(), "warnings": S.LOG[-30:],

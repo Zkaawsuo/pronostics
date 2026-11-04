@@ -66,6 +66,12 @@ class FootballData:
     def __init__(self, key):
         self.key = key
         self.last = 0.0
+        self.emblems = {}   # logo officiel de chaque compétition (fourni avec les matchs)
+
+    def _wait(self):
+        wait = 6.5 - (time.time() - self.last)  # 10 requêtes/minute max
+        if wait > 0:
+            time.sleep(wait)
 
     def matches(self, code, season):
         if not self.key:
@@ -84,8 +90,12 @@ class FootballData:
                 pass
             log(f"football-data {code} {season} : HTTP {getattr(r, 'status_code', 'réseau')}{detail}")
             return []
+        data = r.json()
+        emb = (data.get("competition") or {}).get("emblem")
+        if emb:
+            self.emblems[code] = emb
         out = []
-        for m in r.json().get("matches", []):
+        for m in data.get("matches", []):
             sc = m.get("score") or {}
             ft = sc.get("fullTime") or {}
             # les paris se règlent sur 90 min : on ignore prolongation et tirs au but
@@ -118,9 +128,25 @@ class FootballData:
             return None
         out = []
         for s in r.json().get("scorers", []):
-            out.append({"player": (s.get("player") or {}).get("name", ""), "team": (s.get("team") or {}).get("name", ""),
-                        "goals": s.get("goals") or 0, "pens": s.get("penalties") or 0, "matches": s.get("playedMatches") or 0})
+            pl = s.get("player") or {}
+            out.append({"player": pl.get("name", ""), "team": (s.get("team") or {}).get("name", ""),
+                        "goals": s.get("goals") or 0, "pens": s.get("penalties") or 0, "matches": s.get("playedMatches") or 0,
+                        "number": pl.get("shirtNumber"), "nat": pl.get("nationality"), "last": pl.get("lastName")})
         return out
+
+    def teams(self, code, season):
+        """Équipes d'une compétition avec leurs couleurs (clubColors), pour dessiner les maillots."""
+        if not self.key:
+            return []
+        self._wait()
+        r = _get(f"{self.BASE}/competitions/{code}/teams", params={"season": season},
+                 headers={"X-Auth-Token": self.key})
+        self.last = time.time()
+        if r is None or r.status_code != 200:
+            log(f"Équipes football-data {code} : HTTP {getattr(r, 'status_code', 'réseau')}")
+            return []
+        return [{"name": t.get("name") or "", "short": t.get("shortName") or "", "crest": t.get("crest") or "",
+                 "colors": t.get("clubColors") or ""} for t in r.json().get("teams", [])]
 
 
 # ---------------------------------------------------------------- Maxifoot (buteurs, en secours)
