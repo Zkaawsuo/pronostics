@@ -45,6 +45,7 @@ async function init() {
   S.res = (res && res.results) || {};
   $("#updated").textContent = "Mis à jour " + relTime(S.data.generated);
   renderChips(); renderHighlights(); renderMatches(); renderTickets(); renderMP(); renderPerf(); renderInfos();
+  setInterval(renderLive, 60000);   // la minute avance toute seule
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
@@ -109,9 +110,43 @@ function crest(url, name, cls = "crest") {
              : `<span class="${cls} ph">${esc(name).slice(0, 1)}</span>`;
 }
 
+// ------------------------------------------------------------------ matchs en cours (en tête de la page)
+const minsSince = (iso) => (Date.now() - new Date(iso)) / 60000;
+const isLive = (m) => { const t = minsSince(m.date); return t >= 0 && t < (m.live ? 150 : 125); };
+function liveClock(m) {
+  const t = Math.floor(minsSince(m.date));
+  if (m.live && m.live.status === "PAUSED") return "Mi-temps";
+  if (t <= 45) return Math.max(t, 1) + "'";
+  if (t < 62) return t <= 48 ? "45+'" : "Mi-temps";
+  const m2 = t - 15;
+  return m2 > 90 ? "90+'" : m2 + "'";
+}
+function liveCardHTML(m) {
+  const l = m.live, f = m.final;
+  const age = l && l.at ? Math.round(minsSince(l.at)) : null;
+  const pickTxt = { home: m.home.name, draw: "Nul", away: m.away.name }[m.pick];
+  return `<article class="card live" data-key="${esc(m.key)}">
+    <div class="meta"><span class="cmeta">${compTag(m.comp)}</span><span class="lv"><i></i>${liveClock(m)}</span></div>
+    <div class="lvs">
+      <div class="lteam">${crest(m.home.crest, m.home.name)}<span>${esc(m.home.name)}</span></div>
+      <div class="lscore">${l ? `<b>${l.hg}</b><em>-</em><b>${l.ag}</b>` : '<b class="na">– : –</b>'}</div>
+      <div class="lteam">${crest(m.away.crest, m.away.name)}<span>${esc(m.away.name)}</span></div>
+    </div>
+    <div class="lfoot">${l ? `Score au dernier calcul${age != null ? `, il y a ${age < 1 ? "moins d'1" : age} min` : ""}` : "Commencé : score pas encore remonté"} · Prono d'avant-match : <b>${esc(pickTxt)}</b> ${pct(f[m.pick])}</div>
+  </article>`;
+}
+function renderLive() {
+  const el = $("#live"); if (!el) return;
+  const list = S.data.matches.filter((m) => (S.comp === "ALL" || m.comp === S.comp) && isLive(m));
+  el.innerHTML = list.length ? `<div class="day lvh"><span class="lv"><i></i>En direct</span> ${list.length} match${list.length > 1 ? "s" : ""}</div>` + list.map(liveCardHTML).join("") : "";
+  el.onclick = (e) => { const c = e.target.closest(".card"); if (c) openSheet(c.dataset.key); };
+}
+
 function renderMatches() {
+  renderLive();
   const today = dayKey(new Date()), tom = dayKey(new Date(Date.now() + 864e5));
   const list = S.data.matches.filter((m) => {
+    if (minsSince(m.date) >= 0) return false;   // commencé : dans « En direct » ou terminé
     const dk = dayKey(new Date(m.date));
     return (S.comp === "ALL" || m.comp === S.comp) && m.confidence >= S.conf &&
       (S.day === "all" || (S.day === "today" ? dk === today : dk === tom));

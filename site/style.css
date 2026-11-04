@@ -594,3 +594,23 @@ button.ob { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 #mp-bets > .cta { margin: 0 0 14px; }
 .toast { bottom: calc(140px + var(--safe-b)); }
 #view-combo.active ~ .slipbar { display: none; }
+
+/* ---- En direct ---- */
+#live:empty { display: none; }
+#live { margin: 4px 0 14px; }
+.lv { display: inline-flex; align-items: center; gap: 6px; color: #ff4d5e; font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.lv i { width: 8px; height: 8px; border-radius: 50%; background: #ff4d5e; box-shadow: 0 0 0 0 rgba(255,77,94,.6); animation: lvpulse 1.6s infinite; }
+@keyframes lvpulse { 0% { box-shadow: 0 0 0 0 rgba(255,77,94,.6); } 70% { box-shadow: 0 0 0 8px rgba(255,77,94,0); } 100% { box-shadow: 0 0 0 0 rgba(255,77,94,0); } }
+.day.lvh { display: flex; align-items: center; gap: 8px; }
+.card.live { border-color: rgba(255,77,94,.45); background: linear-gradient(160deg, rgba(255,77,94,.12), var(--card) 55%); }
+.lvs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin: 10px 0 8px; }
+.lteam { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-weight: 600; font-size: 14px; min-width: 0; }
+.lteam span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.lteam .crest { width: 38px; height: 38px; }
+.lscore { display: flex; align-items: center; gap: 8px; font-family: "Barlow Condensed", sans-serif; }
+.lscore b { font-size: 40px; line-height: 1; font-weight: 700; }
+.lscore em { font-style: normal; font-size: 26px; color: var(--mute); }
+.lscore .na { font-size: 26px; color: var(--mute); }
+.lfoot { font-size: 12px; color: var(--mute); text-align: center; }
+.lfoot b { color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .lv i { animation: none; } }

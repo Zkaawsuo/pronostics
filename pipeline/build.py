@@ -416,11 +416,15 @@ horizon = NOW + timedelta(days=C.HORIZON_DAYS)
 upcoming = []
 for code, rows in fd_matches.items():
     for m in rows:
-        if m["status"] in ("SCHEDULED", "TIMED") and NOW - timedelta(hours=2) <= dt(m["date"]) <= horizon:
+        playing = m["status"] in ("IN_PLAY", "PAUSED", "LIVE")
+        if (m["status"] in ("SCHEDULED", "TIMED") and NOW - timedelta(hours=2) <= dt(m["date"]) <= horizon) or \
+                (playing and NOW - timedelta(hours=3) <= dt(m["date"]) <= NOW + timedelta(minutes=10)):
             upcoming.append({"comp": code, "date": m["date"], "home": m["home"], "away": m["away"],
                              "home_name": m["home_short"], "away_name": m["away_short"],
                              "home_crest": m["home_crest"], "away_crest": m["away_crest"],
-                             "stage": m.get("stage"), "fd_id": m["fd_id"]})
+                             "stage": m.get("stage"), "fd_id": m["fd_id"],
+                             "live": playing and {"hg": m["hg"] or 0, "ag": m["ag"] or 0, "status": m["status"],
+                                                  "at": NOW.isoformat()} or None})
 for code, evs in cup_events.items():
     for e in evs:
         if e.get("home_team") and e.get("away_team") and NOW - timedelta(hours=2) <= dt(e["commence_time"]) <= horizon:
@@ -869,7 +873,7 @@ for u in upcoming:
             value = {"side": s, "ev": round(evs[s] * 100, 1), "odd": best[s]["odd"], "book": best[s]["book"]}
 
     cards.append({
-        "key": key, "comp": code, "date": u["date"],
+        "key": key, "comp": code, "date": u["date"], "live": u.get("live"),
         "home": {"name": u["home_name"], "crest": u["home_crest"], "elo": elo_h and round(elo_h), "kit": kit_of(u["home_name"]),
                  "form": ctx["form_home"], "xg": ctx["xg_home"], "rest": rh, "absences": abs_h},
         "away": {"name": u["away_name"], "crest": u["away_crest"], "elo": elo_a and round(elo_a), "kit": kit_of(u["away_name"]),
