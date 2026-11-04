@@ -433,3 +433,23 @@ sup { font-size: 9px; color: var(--mute); margin-left: 2px; }
 .sart .screst { top: 10px; right: 10px; width: 28px; height: 28px; }
 .sinfo { padding: 10px 12px 12px; }
 .sinfo .sname { margin-top: 0; min-height: 0; font-size: 21px; }
+/* stade de nuit : projecteurs sur « À la une » et podium des buteurs */
+.hero { background: radial-gradient(60% 45% at 12% -8%, rgba(190,215,255,.30), rgba(190,215,255,0) 70%),
+    radial-gradient(60% 45% at 88% -8%, rgba(190,215,255,.30), rgba(190,215,255,0) 70%),
+    repeating-linear-gradient(115deg, rgba(255,255,255,.035) 0 2px, transparent 2px 16px),
+    linear-gradient(140deg, var(--tint) 0%, #121a33 78%); }
+.podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; align-items: end; gap: 6px; padding: 18px 8px 10px; margin-bottom: 10px;
+  border-radius: 18px; border: 1px solid rgba(255,255,255,.09);
+  background: radial-gradient(45% 40% at 10% 0%, rgba(190,215,255,.32), transparent 70%), radial-gradient(45% 40% at 90% 0%, rgba(190,215,255,.32), transparent 70%),
+    linear-gradient(180deg, #16204a 0%, #0c1226 70%, #0f3d24 100%); }
+.pcol { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; padding: 0 2px 8px;
+  border-radius: 14px 14px 8px 8px; background: linear-gradient(180deg, transparent 30%, var(--k) 100%); }
+.pcol .ssil { width: 100%; height: 118px; }
+.pcol.r1 .ssil { height: 150px; }
+.pnum { position: absolute; top: 2px; left: 6px; font-family: var(--cond); font-style: italic; font-weight: 800; font-size: 24px; color: var(--accent); }
+.pcol.r1 .pnum { font-size: 30px; }
+.pname { font-family: var(--cond); font-style: italic; font-weight: 800; font-size: 18px; text-transform: uppercase; line-height: 1; margin-top: 4px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcol small { font-size: 11px; color: var(--mute); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ppct { font-family: var(--cond); font-weight: 700; font-size: 24px; line-height: 1.1; margin-top: 2px; }
+.pfair { background: var(--accent); color: #111; font-family: var(--cond); font-style: italic; font-weight: 700; font-size: 14px; padding: 0 7px; border-radius: 6px; }

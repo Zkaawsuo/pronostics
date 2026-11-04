@@ -226,7 +226,7 @@ function renderHighlights() {
   const scard = (p, i) => {
     const d = new Date(p.date), kit = kitOf(p.kit);
     return `<article class="scard" data-key="${esc(p.key)}">
-      <div class="sart" style="--k:${shade(kit.c[0], -0.35)}">
+      <div class="sart" style="--k:${bgOf(kit)}">
         ${ghost(p.crest, "gs")}${playerSVG(p, kit, "s" + i)}
         <span class="srank">#${i + 1}</span>${crest(p.crest, p.team, "screst")}
       </div>
@@ -239,8 +239,17 @@ function renderHighlights() {
       </div>
     </article>`;
   };
+  const podium = (top) => {
+    if (top.length < 3) return `<div class="rail">${top.map(scard).join("")}</div>`;
+    const col = (x, r) => `<button class="pcol r${r}" data-key="${esc(x.key)}" style="--k:${bgOf(kitOf(x.kit))}">
+        <span class="pnum">${r}</span>${playerSVG(x, kitOf(x.kit), "p" + r)}
+        <b class="pname">${esc(x.last || x.name)}</b><small>${esc(x.team)}</small>
+        <span class="ppct">${pct(x.p)}</span><span class="pfair">${n2(x.fair)}</span></button>`;
+    return `<div class="podium">${col(top[1], 2)}${col(top[0], 1)}${col(top[2], 3)}</div>`;
+  };
   el.innerHTML = (tops.length ? `<div class="hl-head"><h3>À la une</h3></div><div class="rail">${tops.map(hero).join("")}</div>` : "") +
-    (sc.length ? `<div class="hl-head"><h3>Top buteurs</h3><span>chance de marquer, s'il joue</span></div><div class="rail">${sc.map(scard).join("")}</div>` : "");
+    (sc.length ? `<div class="hl-head"><h3>Top buteurs</h3><span>chance de marquer, s'il joue</span></div>${podium(sc.slice(0, 3))}
+      ${sc.length > 3 ? `<div class="rail">${sc.slice(3).map((x, i) => scard(x, i + 3)).join("")}</div>` : ""}` : "");
   el.onclick = (e) => { const c = e.target.closest("[data-key]"); if (c) openSheet(c.dataset.key); };
 }
 
@@ -250,6 +259,7 @@ function lum(hex) {
   const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
   return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 }
+const bgOf = (kit) => shade(kit.c[0], lum(kit.c[0]) > 0.4 ? -0.72 : -0.3);
 function shade(hex, f) {
   const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f));
   return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
