@@ -405,21 +405,29 @@ function renderTickets() {
   const groups = T.groups || {};
   const comps = (T.comps || []).filter((c) => groups[c] || (S.data && S.data.competitions[c]));
   if (S.tcomp !== "ALL" && !comps.includes(S.tcomp)) S.tcomp = "ALL";
-  const clabel = (c) => (groups[c] ? groups[c].name : `${S.data.competitions[c].flag} ${S.data.competitions[c].name}`);
-  $("#tcomp-chips").innerHTML = [["ALL", "🌍 Toutes compétitions"]].concat(comps.map((c) => [c, clabel(c)]))
-    .map(([k, l]) => `<button class="chip small ${S.tcomp === k ? "on" : ""}" data-c="${k}">${esc(l)}</button>`).join("");
+  const logoOf = (c) => { const v = S.data.competitions[c]; return v && v.logo ? `<img src="${esc(v.logo)}" alt="" class="${v.logo.startsWith("icons/") ? "full" : ""}">` : esc(v ? v.flag : c); };
+  const tchip = (c) => {
+    const on = S.tcomp === c ? "on" : "";
+    if (groups[c]) return `<button class="chip tlogo group ${on}" data-c="${c}" aria-label="${esc(groups[c].name)}">${groups[c].members.map(logoOf).join("")}</button>`;
+    return `<button class="chip tlogo ${on}" data-c="${c}" aria-label="${esc(S.data.competitions[c].name)}">${logoOf(c)}</button>`;
+  };
+  $("#tcomp-chips").innerHTML = `<button class="chip all ${S.tcomp === "ALL" ? "on" : ""}" data-c="ALL">Toutes</button>` + comps.map(tchip).join("");
   $("#tcomp-chips").onclick = (e) => {
     const c = e.target.closest(".chip"); if (!c) return;
     S.tcomp = c.dataset.c; store.set("tcomp", S.tcomp); renderTickets();
   };
   const res = currentTickets();
-  $("#tickets").innerHTML = Object.entries(T.formulas).map(([fid, fm]) => ticketHTML(fid, fm, res[fid])).join("") +
-    `<p class="src tnote">Rendement moyen = ce que le ticket rapporte en moyenne par euro misé, d'après les probas de l'app. Négatif = la marge du bookmaker l'emporte : c'est le cas le plus fréquent. Les cotes marquées ≈ (double chance) sont estimées : vérifie-les chez ${esc(S.book)}.</p>`;
+  $("#tickets").innerHTML = Object.entries(T.formulas).map(([fid, fm]) => formulaHTML(fid, fm, res[fid])).join("") +
+    `<p class="src tnote">Glisse pour voir les 3 tickets de chaque formule. Cotes ≈ estimées : vérifie-les chez ${esc(S.book)}.</p>`;
   $("#tickets").onclick = (e) => {
     const b = e.target.closest(".copy, .play"); if (!b) return;
-    if (b.classList.contains("copy")) copyTicket(b.dataset.f);
-    else playTicket(b.dataset.f);
+    if (b.classList.contains("copy")) copyTicket(b.dataset.f, +b.dataset.i || 0);
+    else playTicket(b.dataset.f, +b.dataset.i || 0);
   };
+  document.querySelectorAll(".trail").forEach((r) => r.addEventListener("scroll", () => {
+    const i = Math.round(r.scrollLeft / (r.firstElementChild.offsetWidth + 12));
+    r.nextElementSibling && r.nextElementSibling.querySelectorAll("i").forEach((d, k) => d.classList.toggle("on", k === i));
+  }, { passive: true }));
   $("#combis").innerHTML = combisHTML();
   $("#buteurs").innerHTML = buteursHTML();
   $("#tickets-track").innerHTML = trackHTML();
@@ -458,49 +466,53 @@ function buteursHTML() {
     <p class="src" style="margin-top:6px">Vérifie qu'il est titulaire avant de jouer : l'app ne connaît pas les compos.</p>`;
 }
 
-function ticketHTML(fid, fm, t) {
-  const head = (kind) => `<header class="thead"><span class="tname">${fm.emoji} ${esc(fm.name)}</span><span class="tkind">${kind || ""}</span></header><p class="tpitch">${esc(fm.pitch)}</p>`;
-  if (!t) return `<article class="ticket t-${fid}">${head()}<p class="src tnone">Pas de ticket crédible dans cette fourchette avec les matchs à venir chez ${esc(S.book)}.</p></article>`;
+const ticketsOf = (t) => (t ? [t].concat(t.alts || []) : []);
+function formulaHTML(fid, fm, t) {
+  const list = ticketsOf(t);
+  const head = `<header class="fhead"><span class="tname">${fm.emoji} ${esc(fm.name)}</span><span class="fband">cote ${n2(fm.band[0])} à ${n2(fm.band[1])}</span></header>`;
+  if (!list.length) return `<section class="formula t-${fid}">${head}<p class="src tnone">Pas de ticket crédible dans cette fourchette chez ${esc(S.book)} pour l'instant.</p></section>`;
+  return `<section class="formula t-${fid}">${head}
+    <div class="trail">${list.map((x, i) => ticketHTML(fid, fm, x, i, list.length)).join("")}</div>
+    ${list.length > 1 ? `<div class="tdots">${list.map((_, i) => `<i class="${i ? "" : "on"}"></i>`).join("")}</div>` : ""}</section>`;
+}
+
+function ticketHTML(fid, fm, t, i = 0, n = 1) {
   const now = Date.now();
   const started = t.legs.some((l) => new Date(l.date) <= now);
-  const stake = parseFloat(String(S.stake).replace(",", ".")) || 0;
-  const flag = (c) => (S.data && S.data.competitions[c] ? S.data.competitions[c].flag : "");
-  const kind = t.legs.length === 1 ? "Simple" : `Combiné (${t.legs.length})`;
-  const legs = t.legs.map((l) => `<li class="leg ${new Date(l.date) <= now ? "past" : ""}">
-      <div class="lmain">${crests(l.hc, l.ac)}<div><span class="lsel">${esc(l.label)}</span><small>${flag(l.comp)} ${esc(l.match)} · ${fmtWhen(l.date)} · ${pct(l.p)}</small></div></div>
-      <span class="obadge">${l.est ? "≈" : ""}${n2(l.odd)}</span></li>`).join("");
+  const stake = num(S.stake) || 0;
   const ev = Math.round(t.ev * 100);
-  return `<article class="ticket t-${fid}">${head(kind)}
-    <ul class="legs">${legs}</ul>
-    <div class="slip">
-      <div><span>Cote totale</span><span class="obadge big">${n2(t.odds)}</span></div>
-      <div><span>Mise</span><b>${stake ? euro(stake) : "–"}</b></div>
-      <div><span>Gains possibles</span><b class="gain">${stake ? euro(stake * t.odds) : "–"}</b></div>
+  const logo = (c) => { const v = S.data && S.data.competitions[c]; return v && v.logo ? `<img class="llogo" src="${esc(v.logo)}" alt="${esc(v.name)}">` : (v ? v.flag : ""); };
+  const legs = t.legs.map((l, k) => `<li class="sleg ${new Date(l.date) <= now ? "past" : ""}" style="--k:${k}">
+      <div class="lmeta">${logo(l.comp)}<span>${esc(l.match)}</span><time>${fmtWhen(l.date)}</time></div>
+      <div class="lpick"><span class="lsel">${esc(l.label)}</span><span class="obadge">${l.est ? "≈" : ""}${n2(l.odd)}</span></div></li>`).join("");
+  return `<article class="slipt" style="--d:${i}">
+    <div class="st-head"><span class="st-brand">BETI<b>X</b></span><span>${t.legs.length === 1 ? "Simple" : `Combiné ×${t.legs.length}`}</span><span class="st-no">${n > 1 ? `${i + 1}/${n}` : ""}</span></div>
+    <ul class="st-legs">${legs}</ul>
+    <div class="st-tear" aria-hidden="true"></div>
+    <div class="st-foot">
+      <div class="st-odds"><small>Cote totale</small><b>${n2(t.odds)}</b></div>
+      <div class="st-money"><span>Mise <b>${stake ? euro(stake) : "–"}</b></span><span>Gain <b class="gain">${stake ? euro(stake * t.odds) : "–"}</b></span></div>
     </div>
-    <div class="tstats">
-      <div><b>${pct(t.p)}</b><small>de chances</small></div>
-      <div><b>1 sur ${Math.max(1, Math.round(1 / t.p))}</b><small>passe environ</small></div>
-      <div><b class="${ev >= 0 ? "pos" : "neg"}">${ev >= 0 ? "+" : ""}${ev} %</b><small>rendement moyen</small></div>
-    </div>
-    ${started ? '<p class="note">⚠ Un match a déjà commencé : ce ticket n\'est plus jouable tel quel. Il sera remplacé au prochain calcul.</p>' : ""}
-    ${t.window_h > 48 ? `<p class="src">${t.window_h > 100 ? "Construit avec les matchs de la semaine (rien de jouable dans les 4 prochains jours)." : "Pas assez de matchs dans les 48 h : ticket élargi aux 4 prochains jours."}</p>` : ""}
-    <div class="tact"><button class="copy" data-f="${fid}">Copier</button>
-      ${isPlayed(fid, t) ? `<button class="play done" data-f="${fid}">Dans Mes paris ✓</button>` : started ? "" : `<button class="play" data-f="${fid}">Je l'ai joué</button>`}</div>
+    <div class="st-tags"><span class="tg">${pct(t.p)} de chances</span><span class="tg ${ev >= 0 ? "pos" : "neg"}">rendement ${ev >= 0 ? "+" : ""}${ev} %</span>${t.window_h > 48 ? '<span class="tg">matchs de la semaine</span>' : ""}</div>
+    <div class="st-bar" aria-hidden="true"></div>
+    ${started ? '<p class="note">⚠ Un match a commencé : ticket remplacé au prochain calcul.</p>' : ""}
+    <div class="tact"><button class="copy" data-f="${fid}" data-i="${i}">Copier</button>
+      ${isPlayed(fid, t) ? `<button class="play done" data-f="${fid}" data-i="${i}">Dans Mes paris ✓</button>` : started ? "" : `<button class="play" data-f="${fid}" data-i="${i}">Je l'ai joué</button>`}</div>
   </article>`;
 }
 
 const legSig = (legs) => legs.map((l) => l.key + "|" + l.sel).sort().join(",");
 const isPlayed = (src, t) => S.bets.some((b) => b.src === src && legSig(b.legs) === legSig(t.legs));
 
-function playTicket(fid) {
-  const t = currentTickets()[fid]; if (!t) return;
+function playTicket(fid, i = 0) {
+  const t = ticketsOf(currentTickets()[fid])[i]; if (!t) return;
   if (isPlayed(fid, t)) { toast("Déjà dans Mes paris"); return; }
   openBetForm({ src: fid, book: S.book, odds: t.odds,
     legs: t.legs.map(({ key, comp, date, match, hc, ac, sel, label, odd }) => ({ key, comp, date, match, hc, ac, sel, label, odd })) });
 }
 
-function copyTicket(fid) {
-  const T = S.tickets, fm = T.formulas[fid], t = currentTickets()[fid];
+function copyTicket(fid, i = 0) {
+  const T = S.tickets, fm = T.formulas[fid], t = ticketsOf(currentTickets()[fid])[i];
   if (!t) return;
   const txt = `${fm.emoji} Ticket ${fm.name} (${S.book}) – cote ${n2(t.odds)} – ${pct(t.p)} de chances\n` +
     t.legs.map((l) => `• ${l.label} (${l.match}, ${fmtWhen(l.date)}) @${l.est ? "≈" : ""}${n2(l.odd)}`).join("\n");

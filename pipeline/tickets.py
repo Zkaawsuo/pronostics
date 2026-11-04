@@ -133,7 +133,7 @@ def search(cands, fm, per_bucket=6, width=0.04):
             "first": legs[0]["date"]}
 
 
-def _formulas(cards, book, now, windows):
+def _formulas(cards, book, now, windows, alts=0):
     """Les 3 formules ; chacune évite si possible les sélections déjà prises par les précédentes,
     pour proposer 3 tickets vraiment différents (sinon on accepte de les réutiliser)."""
     res, used = {}, set()
@@ -151,6 +151,17 @@ def _formulas(cards, book, now, windows):
         res[fid] = t
         if t:
             used |= {(l["key"], l["sel"]) for l in t["legs"]}
+            if alts:   # 2 autres tickets de la même formule, sur d'autres matchs
+                t["alts"], taken = [], {l["key"] for l in t["legs"]}
+                win = t["window_h"]
+                cands = candidates(cards, book, now, win)
+                for _ in range(alts):
+                    a = search([c for c in cands if c["key"] not in taken], fm)
+                    if not a:
+                        break
+                    a["window_h"] = win
+                    t["alts"].append(a)
+                    taken |= {l["key"] for l in a["legs"]}
     return res
 
 
@@ -207,14 +218,15 @@ def build_all(cards, now):
     comps = sorted({c["comp"] for c in cards})
     by_book, by_comp = {}, {}
     for book in order:
-        by_book[book] = _formulas(cards, book, now, (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2))
+        n_alt = 2 if book == C.TRACK_BOOK else 0
+        by_book[book] = _formulas(cards, book, now, (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2), n_alt)
         # tickets spéciaux par compétition : on va chercher jusqu'à la semaine si besoin (ex. LDC le week-end)
         wins = (C.TICKET_WINDOW_H, C.TICKET_WINDOW_H * 2, C.HORIZON_DAYS * 24)
-        by_comp[book] = {comp: _formulas([c for c in cards if c["comp"] == comp], book, now, wins) for comp in comps}
+        by_comp[book] = {comp: _formulas([c for c in cards if c["comp"] == comp], book, now, wins, n_alt) for comp in comps}
         for gid, members in GROUPS.items():   # tickets mixant plusieurs compétitions (ex. LDC + Europa)
             sub = [c for c in cards if c["comp"] in members]
             if sub:
-                by_comp[book][gid] = _formulas(sub, book, now, wins)
+                by_comp[book][gid] = _formulas(sub, book, now, wins, n_alt)
     groups = [g for g, members in GROUPS.items() if any(c["comp"] in members for c in cards)]
     return {"books": order, "coverage": books, "by_book": by_book, "by_comp": by_comp, "comps": groups + comps,
             "groups": {g: {"name": GROUPS_LABEL[g], "members": GROUPS[g]} for g in groups},
@@ -236,7 +248,7 @@ def track(pending, hist, current, now, results):
             hist.append({**cur, "status": "pending"})
         new = current.get(fid)
         if new:
-            pending[fid] = {**new, "formula": fid, "created": now.isoformat()}
+            pending[fid] = {**{k: v for k, v in new.items() if k != "alts"}, "formula": fid, "created": now.isoformat()}
         else:
             pending.pop(fid, None)
     for t in hist:
