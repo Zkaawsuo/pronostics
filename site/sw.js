@@ -1,5 +1,4 @@
 // Coque de l'app en cache, données toujours récupérées en priorité sur le réseau.
-// relance publication 04/11
 const CACHE = "betix-v17";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icons/icon-192.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
