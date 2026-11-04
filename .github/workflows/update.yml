@@ -60,6 +60,17 @@ jobs:
             fi
           done
 
+      - name: Envoyer les tickets en images sur Telegram
+        if: hashFiles('tg_daily.json') != ''
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          pip install playwright==1.47.0 >/dev/null
+          python -m playwright install --with-deps chromium >/dev/null
+          python pipeline/shots.py
+          rm -f tg_daily.json tg_ticket_*.png
+
       - name: Sauvegarder l'historique
         run: |
           git config user.name "pronos-bot"

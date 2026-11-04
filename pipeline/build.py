@@ -972,12 +972,12 @@ elif C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
     paris = NOW.astimezone(N.PARIS)
     today = paris.strftime("%Y-%m-%d")
     first = "telegram_day" not in state            # tout premier envoi : tout de suite, pour tester
-    if state.get("telegram_day") != today and (first or paris.hour >= 7):
-        ok, detail = N.send(C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT_ID, N.message(tk, url))
-        if ok:
-            state["telegram_day"] = today
-        else:
-            S.log(f"Telegram : message non envoyé ({detail}). As-tu bien écrit /start à ton bot ?")
+    if (state.get("telegram_day") != today and (first or paris.hour >= 7)) or not state.get("tg_images"):
+        state["tg_images"] = 1   # première fois en images : envoi tout de suite pour voir le rendu
+        # les tickets partent en images juste après le calcul (pipeline/shots.py) ; le texte sert de secours
+        (Path(__file__).resolve().parent.parent / "tg_daily.json").write_text(
+            json.dumps({"text": N.message(tk, url), "url": url}, ensure_ascii=False))
+        state["telegram_day"] = today
     sent = state.setdefault("value_sent", [])
     fresh_vals = [v for v in value_bets if v["key"] + v["label"] not in sent]
     if fresh_vals and not first:

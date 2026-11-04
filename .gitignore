@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 .env
+tg_daily.json
+tg_ticket_*.png
