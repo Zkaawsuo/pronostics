@@ -665,10 +665,10 @@ if C.AF_KEY:
 
 # Premier League : blessés et suspendus de l'appli Fantasy officielle (1 fois toutes les 6 h)
 fpl = state.get("fpl") or {}
-if fpl.get("v") != 2 or not fpl.get("at") or (NOW - dt(fpl["at"])).total_seconds() > 6 * 3600:
+if fpl.get("v") != 3 or not fpl.get("at") or (NOW - dt(fpl["at"])).total_seconds() > 6 * 3600:
     rows = S.fpl_unavailable()
     if rows:
-        fpl = state["fpl"] = {"v": 2, "at": NOW.isoformat(), "rows": rows}
+        fpl = state["fpl"] = {"v": 3, "at": NOW.isoformat(), "rows": rows}
 for it in fpl.get("rows", []):
     team = fd_team_match.find(it["team"], 0.75)
     if not team or any(norm(x["player"]) == norm(it["player"]) for x in absences[team]):

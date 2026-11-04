@@ -329,7 +329,7 @@ def af_injuries(key, league_id, season, day):
 
 
 # ---------------------------------------------------------------- Fantasy Premier League (blessés / suspendus, PL seulement)
-FPL_STATUS = {"i": "blessé", "s": "suspendu", "u": "indisponible", "d": "incertain"}   # "n" = prêté ailleurs : ignoré
+FPL_STATUS = {"i": "blessé", "s": "suspendu", "d": "incertain"}   # "u"/"n" = parti ou prêté : ignorés
 
 
 def fpl_unavailable():
