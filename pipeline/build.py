@@ -982,6 +982,18 @@ elif C.TELEGRAM_TOKEN and C.TELEGRAM_CHAT_ID:
         (Path(__file__).resolve().parent.parent / "tg_daily.json").write_text(
             json.dumps({"text": N.message(tk, url), "url": url}, ensure_ascii=False))
         state["telegram_day"] = today
+    # envoi à la demande : pipeline/tg_request.json = {"id": "...", "comp": "CL"} (une seule fois par id)
+    req_f = Path(__file__).resolve().parent / "tg_request.json"
+    if req_f.exists():
+        try:
+            req = json.loads(req_f.read_text())
+        except ValueError:
+            req = {}
+        if req.get("id") and req.get("comp") in C.COMPETITIONS and state.get("tg_req_done") != req["id"]:
+            (Path(__file__).resolve().parent.parent / "tg_daily.json").write_text(
+                json.dumps({"text": N.message(tk, url), "url": url, "comp": req["comp"],
+                            "comp_name": C.COMPETITIONS[req["comp"]]["name"]}, ensure_ascii=False))
+            state["tg_req_done"] = req["id"]
     sent = state.setdefault("value_sent", [])
     fresh_vals = [v for v in value_bets if v["key"] + v["label"] not in sent]
     if fresh_vals and not first:

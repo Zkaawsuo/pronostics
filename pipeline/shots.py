@@ -23,7 +23,7 @@ def send_text(text):
                   data={"chat_id": CHAT, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"})
 
 
-def capture():
+def capture(comp="ALL"):
     from playwright.sync_api import sync_playwright
     srv = subprocess.Popen([sys.executable, "-m", "http.server", "8790", "--bind", "127.0.0.1", "-d", str(ROOT / "site")],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -34,12 +34,13 @@ def capture():
             br = p.chromium.launch()
             pg = br.new_page(viewport={"width": 420, "height": 1600}, device_scale_factor=2, locale="fr-FR",
                              timezone_id="Europe/Paris")
-            pg.add_init_script("try{localStorage.setItem('book','\"Betclic\"');localStorage.setItem('tcomp','\"ALL\"')}catch(e){}")
+            pg.add_init_script("try{localStorage.setItem('book','\"Betclic\"');localStorage.setItem('tcomp','\"" + comp + "\"')}catch(e){}")
             pg.goto("http://127.0.0.1:8790/", wait_until="networkidle")
             pg.click(".tabs button[data-view='tickets']")
             pg.add_style_tag(content=".tact,.advice,.note{display:none!important}*{animation:none!important}")
             pg.wait_for_timeout(2500)
-            for i, el in enumerate(pg.query_selector_all(".formula .trail > .slipt:first-child")[:4]):
+            sel = ".formula .trail > .slipt" if comp != "ALL" else ".formula .trail > .slipt:first-child"
+            for i, el in enumerate(pg.query_selector_all(sel)[:9 if comp != "ALL" else 4]):
                 f = ROOT / f"tg_ticket_{i}.png"
                 el.screenshot(path=str(f))
                 shots.append(f)
@@ -55,14 +56,15 @@ def main():
         return
     msg = json.loads(job.read_text())
     try:
-        shots = capture()
+        shots = capture(msg.get("comp", "ALL"))
     except Exception as ex:   # navigateur indisponible : on n'empêche pas le message de partir
         print("captures impossibles :", type(ex).__name__)
         shots = []
     if not shots:
         send_text(msg["text"])
         return
-    caption = f'<b>⚽ Tickets du jour · Betclic</b>\n<a href="{msg["url"]}">Ouvrir l\'appli</a> · Probabilités, pas certitudes : joue petit.'
+    title = f"Tickets {msg['comp_name']}" if msg.get("comp") else "Tickets du jour"
+    caption = f'<b>⚽ {title} · Betclic</b>\n<a href="{msg["url"]}">Ouvrir l\'appli</a> · Probabilités, pas certitudes : joue petit.'
     media = [{"type": "photo", "media": f"attach://p{i}", **({"caption": caption, "parse_mode": "HTML"} if i == 0 else {})}
              for i in range(len(shots))]
     files = {f"p{i}": (f.name, f.read_bytes(), "image/png") for i, f in enumerate(shots)}
